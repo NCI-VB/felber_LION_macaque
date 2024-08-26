@@ -5103,7 +5103,67 @@ num_columns_for_plot <- 3
 ```{r scatterplots_with_pvalues___FigS5C, ref.label=c('scatterplots_with_pvalues'), results='asis', fig.height=7, fig.width=10}
 ```
 
+## Supp Figure S6 {.tabset}
 
+### FigS6 {.tabset}
+
+Selected scatterplots
+
+```{r corrScatterPlots_prep_FigS6}
+########## Reload data from Fig 6F
+### which dataset levels/FC, trimmed to the tab
+curr_ds <- list_of_diff_counts[[paste0("Fig6FG_GC")]] %>%
+  column_to_rownames("Gene")
+
+###### MSD = D2-D1 only log2FC
+curr_df2 <- data.frame(t(list_of_diff_counts[[paste0("Fig3C_MSD_V4_D2vsD1")]])) %>%
+  ### make row 1 colnames
+  janitor::row_to_names(row_number = 1) %>%
+  ### trim to only D2-D1
+  rownames_to_column("sampleName") %>%
+  dplyr::filter(grepl("D2-D1",sampleName)) %>%
+  ### be sure sorted
+  dplyr::arrange(sampleName) %>%
+  column_to_rownames("sampleName") %>%
+  #### then remove columns with all NA
+  select_if(~ !all(is.na(.))) %>%
+  ### be sure numeric
+  mutate_if(is.character, as.numeric)
+  
+
+selected_pairs_df <- data.frame("var_x"=c("LN__CD4_Tfh_CXCR3pos_Ki67pos",
+                                          "LN__GC_CD4_Tfh_CXCR3pos_Ki67pos",
+                                          "LN__CD4_Tfh_CXCR3pos_Ki67pos",
+                                          "LN__GC_CD4_Tfh_CXCR3pos_Ki67pos",
+                                          "LN__CD8_Tfh_CXCR3pos_Ki67pos",
+                                          "LN__Bcells_GC_BCL6pos_ki67pos_PctBCells",
+                                          "LN__CD8_Tfh_CXCR3pos_Ki67pos",
+                                          "LN__Bcells_GC_BCL6pos_ki67pos_PctBCells"),
+                                "Day_x"=c("D8-D1",
+                                             "D3-D1",
+                                             "D3-D1",
+                                             "D8-D1",
+                                             "D8-D1",
+                                             "D8-D1",
+                                             "D8-D1",
+                                             "D8-D1"
+                                             ),
+                                "var_y"=c("IL.7",
+                                          "FLT3L",
+                                          "CXCL10.IP.10",
+                                          "CXCL11.ITAC",
+                                          "CXCL10.IP.10",
+                                          "FLT3L",
+                                          "CXCL11.ITAC",
+                                          "CXCL12.SDF.1a"),
+                                "Day_y"=c(rep("D2-D1",8))
+)
+
+num_columns_for_plot <- 2
+```
+
+```{r corrScatterplots_with_RandPvalues__FigS6, ref.label=c('corrScatterplots_with_RandPvalues'), results='asis', fig.height=10}
+```
 
 ## Figure 7 {.tabset}
 
