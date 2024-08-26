@@ -1,0 +1,5758 @@
+---
+title: "CCRVB-18: Felber, DNA/LION MSD and cell populations"
+author: "Kate Goldfarbmuren"
+date: "`r Sys.Date()`"
+output: 
+  html_document:
+    toc: TRUE
+    #toc_float: TRUE
+    toc_depth: 4
+    code_folding: hide
+editor_options:
+  
+  chunk_output_type: console
+params:  
+
+  parent_dir: "~/../../Volumes/NCI_VB/felber/ccrvb18_LIONvaccineMSD_KCG/ForMS"
+  input_dir: "~/../../Volumes/NCI_VB/felber/ccrvb18_LIONvaccineMSD_KCG/ForMS/input_data"
+
+
+  ### cutoffs
+  study_name: "ccrvb18_LION_MSDandCellPops"
+
+
+  log2_or_raw: "value_log2" #"value_raw" or "value_log2"
+  prior_for_volcano_p: 1e-18
+  pCutoff: 0.05
+  FCcutoff: 1.0
+---
+
+
+```{r setup, include=FALSE}
+# additional parameters for knitr & tables
+knitr::opts_chunk$set(echo = TRUE, 
+                      fig.width = 9, 
+                      fig.height = 9, 
+                      dev = "png", #change to pdf to make all editable
+                      cache = FALSE,
+                      warning = FALSE,
+                      message = FALSE)
+
+#knitr::opts_chunk$get("label")
+
+#https://github.com/rstudio/DT/issues/867
+DT::datatable(
+  matrix(), extensions="Buttons",
+  options = list(dom = 'Blfrtip',
+                           buttons = c('copy', 'csv', 'excel', 'pdf', 'print'),
+                           lengthMenu = list(c(10,25,50,-1),
+                                             c(10,25,50,"All"))))
+
+
+```
+
+```{r paths_lists, warning=FALSE, include=FALSE}
+############################################################
+# generate output directories
+############################################################
+parent_dir = params$parent_dir
+input_dir = params$input_dir
+
+#### generate
+outputIMAGES_dir = paste0(parent_dir,"/IMAGES")
+outputTABLES_dir = paste0(parent_dir,"/TABLES")
+outputRData_dir = paste0(parent_dir,"/RData")
+outputEnrichr_dir = paste0(parent_dir,"/TABLES/Enrichr")
+output_dirs <- c(outputIMAGES_dir, outputTABLES_dir, outputRData_dir, outputEnrichr_dir)
+
+for (curr_dir in output_dirs){
+  if(!(file.exists(file.path(curr_dir)))){
+    dir.create(file.path(curr_dir), showWarnings = TRUE)
+  }
+}
+
+```
+
+
+```{r source_pkgs, warning=FALSE, include=FALSE}
+############################################################
+# packages & functions
+############################################################
+# package list
+list.of.packages=c("openxlsx","readxl", "tidyverse","cowplot", "pheatmap","ggpubr","eulerr", "enrichR","knitr","broom","kableExtra","gtsummary","org.Hs.eg.db",
+"gridExtra","DT","downloadthis","ggbeeswarm","ggrepel","plotly","ggplotify","strex","dendsort","RColorBrewer","colorspace","EnhancedVolcano","limma","edgeR",
+"corrplot","flextable","dendextend","ggalluvial","geepack","lmerTest")
+
+
+#install as needed
+new.packages <- list.of.packages[!(list.of.packages %in% installed.packages()[,"Package"])]
+if(length(new.packages)) BiocManager::install(new.packages)
+
+# source common functions, need to have NCI_VB mounted to run this
+#source(file.path(functions_path,"CommonFunctions_KCG.R"))
+
+# Rmd functions
+#source(file.path(functions_path,'Rmd_functions_KCG.R'))
+
+# load packages
+invisible(lapply(list.of.packages, library, character.only = TRUE))
+```
+
+
+```{r loadData}
+
+
+
+### get tab names
+xlsx_file_path <- file.path(input_dir,"raw_datasets.xlsx")
+tab_names<-openxlsx::getSheetNames(xlsx_file_path)
+### list with separate element for each tab
+list_of_datasets <- lapply(tab_names,
+                           openxlsx::read.xlsx,xlsxFile=xlsx_file_path)
+names(list_of_datasets) <- tab_names
+
+### open list for data plotted in each figure panel
+list_of_diff_counts <- list()
+list_of_stats <- list()
+
+```
+
+# {.tabset}
+
+## Figure 1 {.tabset}
+
+### Fig 1B {.tabset}
+
+```{r prep_Fig1B}
+
+##### set prior for log2 (0 for MSD or Fig 1/2, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["Figure1BDEF"]] %>%
+  dplyr::filter(Fig %in% c("figure 1B upper panel","figure 1B bottom panel")) %>%
+  ### add log10
+  dplyr::mutate(log10_value = log10(value_raw + prior_to_use))
+
+colors_df <- data.frame("panel"=c("figure 1B upper panel","figure 1B bottom panel"),
+                        "color"=c("darkred","grey20"))
+
+
+### To name output files
+contrast_name <- "Fig1B"
+
+num_columns_for_plot <- 1
+```
+
+
+```{r lineTraces_withMean__Fig1B, results='asis',fig.height=6, fig.width=6}
+
+list_of_plots_mean <- list()
+## for each analyte of interest
+for(i in unique(data_to_use$Fig)){
+ phen_to_plot <- data_to_use %>%
+    dplyr::filter(Fig == i) %>%
+   ## make timepoint for plotting
+   dplyr::mutate(TimePoint = factor(TimePoint,unique(dplyr::filter(data_to_use, Fig == i)$TimePoint))) 
+                   
+  curr_color <- colors_df$color[which(colors_df$panel == i)]
+
+
+ 
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = TimePoint, y = log10_value, group = MacaqueID)) + 
+    geom_line(color = curr_color, linewidth = 0.3)+
+    scale_x_discrete(labels = unique(phen_to_plot$TimePoint) %>%
+                       str_replace("w",", w") %>%
+                       str_remove_all("k"))+
+    #scale_y_continuous(transform = "log10")+
+    labs(title = i)+
+    ylab("log10(value)")+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_blank(), 
+            axis.title.x = element_blank(),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+   p_mean <- p +
+    stat_summary(aes(group = 1, y = log10_value), fun=mean, geom="line", colour=curr_color, linewidth = 1)+
+  
+    stat_summary(aes(group = 1, y = log10_value), fun=mean, geom="point", colour=curr_color)
+
+      # plot(p)
+
+    list_of_plots_mean[[i]] <- p_mean   
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots_mean, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+```
+
+### Fig 1D 
+
+```{r prep_Fig1D}
+
+##### set prior for log2 (0 for MSD or Fig 1/2, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["Figure1BDEF"]] %>%
+  dplyr::filter(Fig == c("figure1D")) %>%
+  ### add log10
+  dplyr::mutate(log10_value = log10(value_raw + prior_to_use),
+                TimePoint = as.numeric(TimePoint))
+
+#### set y axis limits
+y_axis_limits <- c(1,6)
+shapes_to_use <- c(24,21,4,22,25)
+
+
+### To name output files
+contrast_name <- "Fig1D"
+
+num_columns_for_plot <- 1
+```
+
+
+```{r lineTraces_ByTime, results='asis',fig.height=3, fig.width=7}
+  p <- ggplot(data_to_use, aes(x = TimePoint, y = log10_value, group = MacaqueID)) + 
+    geom_line(color = "darkblue", linewidth = 0.3)+
+  geom_point(aes(shape = MacaqueID), color = "darkblue", fill="darkblue")+
+    scale_x_continuous(limits = c(0,120), breaks = c(seq(0,28,4),seq(40,120,20)))+
+    scale_y_continuous(limits = y_axis_limits)+
+  scale_shape_manual(values = shapes_to_use)+
+    labs(title = unique(data_to_use$Fig))+
+  xlab("weeks of study")+
+  ylab("log10(value)")+
+  theme_bw()+
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"))
+plot(p)
+```
+
+
+### Fig 1E
+
+```{r prep_Fig1E}
+
+##### set prior for log2 (0 for MSD or Fig 1/2, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["Figure1BDEF"]] %>%
+  dplyr::filter(Fig == c("figure1E")) %>%
+  ### add log10
+  dplyr::mutate(log10_value = value_raw, ### already logged
+                TimePoint = as.numeric(TimePoint))
+
+#### set y axis limits
+y_axis_limits <- c(0.5,5)
+shapes_to_use <- c(24,21,22,25)
+
+### To name output files
+contrast_name <- "Fig1E"
+
+num_columns_for_plot <- 1
+```
+
+
+```{r lineTraces_ByTime__Fig1E, ref.label=c('lineTraces_ByTime'), results='asis',fig.height=3, fig.width=7}
+```
+
+### Fig 1F
+
+```{r prep_Fig1F}
+
+##### set prior for log2 (0 for MSD or Fig 1/2, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["Figure1BDEF"]] %>%
+  dplyr::filter(Fig == c("figure1F")) %>%
+  ### add log10
+  dplyr::mutate(log10_value = log10(value_raw + prior_to_use))
+
+plot_sig_only <- "no"
+
+### To name output files
+contrast_name <- "Fig1F"
+
+num_columns_for_plot <- 1
+```
+
+
+
+```{r scatterplotsByGroup_with_pvalues, results='asis', fig.height=5, fig.width=5}
+
+
+
+ phen_to_plot <- data_to_use %>%
+   dplyr::mutate(TimePoint = factor(TimePoint, c("V2w2L", #DNA/LION
+                                                 "V2w2D", #DNA(IM)
+                                                 "V2w2EP",#DNA(EP)
+                                                 "V2w2DP" #DNA(EP)+protein
+                                                 )))
+  #### calculate MannWhitney between groups(i.e. TimePoint)
+curr_test <- compare_means(log10_value ~ TimePoint, data = phen_to_plot, method = "wilcox.test")
+list_of_stats[[paste0(contrast_name)]] <- curr_test
+
+  # cat("##### ",paste0(i," "),"\n")
+  # cat("\n")
+  max_y <- max(phen_to_plot$log10_value, na.rm=TRUE)
+  min_y <- min(phen_to_plot$log10_value, na.rm=TRUE)
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(curr_test),
+                          length(which(curr_test[,"p"] < 0.05))
+  )
+  maxy_y_to_plot <- max_y*(1+0.05*(num_contrasts+1))
+  
+  color_df <- data.frame("TimePoint"=levels(phen_to_plot$TimePoint),
+
+                         "color"=c("darkred","grey50","black","black"),
+                         "shape"=c(16,16,2,6))
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = TimePoint, y = log10_value)) + 
+        
+    scale_color_manual(values=color_df$color) +
+    scale_shape_manual(values=color_df$shape) +
+    geom_beeswarm(aes(color = TimePoint, shape = TimePoint), size = 3, cex = 3)+
+  scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot)
+                     )+
+    ## add line with mean
+    stat_summary(aes(group = 1, y = log10_value), fun=mean, geom="crossbar", colour="grey30", linetype = "11", size = 0.3)+
+    labs(x = "group")+
+  theme_bw()+
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"))
+  
+  
+  
+  box_pval_cut <- 0.05
+  
+  ##### add p values
+  
+  ### if plotting all p
+if(plot_sig_only == "no"){
+
+  
+  for(l in 1:num_contrasts){
+     p <- p +
+        stat_pvalue_manual(curr_test[l,], label = "p.format",size = 4,
+                           y.position = max_y+0.1*l*range_y, 
+                           bracket.size = 0.2, tip.length = 0)
+  }
+  
+}else{
+ 
+  # if there are any sig contrasts
+  if(num_contrasts > 0){
+     ## trim to sig contrasts
+        sig_pvals <- curr_test[which(curr_test[,"p"]  < 0.05),] 
+        
+    for(l in 1:nrow(sig_pvals)){
+         p <- p +
+          stat_pvalue_manual(sig_pvals[l,], label = "p.format",size = 4,
+                             y.position = max_y+0.1*l*range_y, bracket.size = 0.2, tip.length = 0)
+                             
+        }
+      
+      
+  }else{
+    p <- p
+  }   
+
+  
+}
+    
+ plot(p)
+
+```
+
+### Fig 1G {.tabset}
+
+```{r prep_Fig1G}
+
+#### this data is already log10
+##### select data
+data_to_use <- list_of_datasets[["Figure1G"]] %>%
+  ### pivot_wider to plot
+  tidyr::pivot_wider(names_from = "Antibody", values_from = "value_raw")   %>%
+### add treatment group
+  dplyr::left_join(list_of_datasets[["Figure1BDEF"]] %>%
+                     dplyr::filter(Fig == c("figure1F")) %>%
+                     ### add useful treatment
+                     dplyr::mutate(Treatment = ifelse(grepl("L",TimePoint),"DNA_LION",
+                                                      ifelse(endsWith(TimePoint,"2D"),"DNA","non"))) %>%
+                     dplyr::select(MacaqueID,Treatment) %>%
+                     dplyr::filter(Treatment != "non") %>%
+                     unique(),
+                   by = "MacaqueID"
+                     ) 
+
+   
+
+
+
+### To name output files
+contrast_name <- "Fig1G"
+
+num_columns_for_plot <- 1
+```
+
+```{r NAb_heatmap__Fig1G, results='asis', fig.height=4, fig.width=5}
+df_for_plot <- data_to_use %>%
+  ## remove unneeded columns
+  dplyr::select(-c(Fig,Treatment)) %>%
+  column_to_rownames("MacaqueID")
+
+### annotation for columns
+annotation_col1 <- data.frame("Antibody_time"=colnames(df_for_plot)) %>%
+  ## break up Antibody and timepoint
+   dplyr::mutate(Antibody = str_before_first(Antibody_time,"_"),
+                 Antibody = ifelse(Antibody == "D614G",Antibody_time,Antibody), ## makes unique colnames
+                Time = str_after_first(Antibody_time,"_")) 
+# set colnames for df_for_plot
+colnames(df_for_plot) <- annotation_col1$Antibody
+
+# trim col annotation
+annotation_col <- annotation_col1 %>% 
+  dplyr::select(-Antibody_time) %>%
+  column_to_rownames("Antibody")
+
+### annotation for rows
+annotation_row <- data_to_use %>%
+  dplyr::select(c(MacaqueID,Treatment)) %>%
+  column_to_rownames("MacaqueID")
+  
+### color scale
+mycols <- colorRampPalette(c("#EBEBEB","#0099D5"))(1000)
+breakscale <- seq(0,5, length=1000)
+
+
+p <- pheatmap(df_for_plot, scale="none", col = mycols,
+                breaks=breakscale, clustering_method="ward.D2",
+                #gaps_col = gaps_to_use, 
+              border_color = "black",
+                cluster_rows = FALSE, cluster_cols = FALSE,
+                annotation_col = annotation_col,
+              annotation_row = annotation_row,
+              display_numbers = round(df_for_plot,1)
+              #  annotation_colors = annotation_colors
+)
+p
+
+
+
+```
+
+## Figure 2 {.tabset}
+
+### Fig 2A {.tabset}
+
+```{r prep_Fig2A}
+
+##### set prior for log2 (0 for MSD or Fig 1/2, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["Figure2ABDE"]] %>%
+  dplyr::filter(Fig %in% c("Fig2A top panel","Fig2 A bottom  panel")) %>%
+  ### values are already log10
+  dplyr::mutate(log10_value = value_raw,
+                group = ifelse(grepl("top",Fig),"nofill",
+                                ifelse(grepl(paste(c("V3","V4"),collapse = '|'),TimePoint),"fill","nofill"))) %>%
+   ## make timepoint for plotting
+   dplyr::mutate(TimePoint = factor(TimePoint,
+                                    unique(dplyr::filter(list_of_datasets[["Figure2ABDE"]],
+                                                         Fig %in% c("Fig2A top panel","Fig2 A bottom  panel"))$TimePoint))) 
+
+
+
+
+
+colors_df <- data.frame("panel"=c("Fig2A top panel","Fig2 A bottom  panel"),
+                        "color"=c("darkred","grey20"))
+fill_df <- data.frame("group"=c("nofill","fill"),
+                      "fill"=c("white","#FDC5BC")) %>%
+  column_to_rownames("group")
+
+y_limits <-c(0,3)
+y_breaks <- c(seq(0,0.9,0.3),seq(1,3,1))
+x_labels <- levels(data_to_use$TimePoint) %>%
+                       str_replace("w",", w") %>%
+                       str_remove_all("k")
+x_limits <- levels(data_to_use$TimePoint) 
+
+### To name output files
+contrast_name <- "Fig2A"
+
+num_columns_for_plot <- 1
+```
+
+
+
+```{r scatterplots_withBox, results='asis',fig.height=6, fig.width=6}
+
+list_of_plots <- list()
+## for each analyte of interest
+for(i in unique(data_to_use$Fig)){
+ phen_to_plot <- data_to_use %>%
+    dplyr::filter(Fig == i)                    
+  curr_color <- colors_df$color[which(colors_df$panel == i)]
+
+
+ 
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = TimePoint, y = log10_value)) + 
+    ## addboxplot
+    geom_boxplot(aes(fill = group),color = curr_color)+
+        geom_beeswarm(color = curr_color, corral.width = 0.8)+
+    scale_fill_manual(values = c("nofill"=fill_df["nofill","fill"],"fill"=fill_df["fill","fill"]))+
+    scale_x_discrete(limits = factor(x_limits),
+                     labels = x_labels)+
+    scale_y_continuous(limits = y_limits,
+                       breaks = y_breaks)+
+    labs(title = i)+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_blank(), 
+            axis.title.x = element_blank(),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+ 
+      # plot(p)
+
+    list_of_plots[[i]] <- p   
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+```
+
+### Fig 2B {.tabset}
+
+```{r prep_Fig2B}
+
+##### set prior for log2 (0 for MSD or Fig 1/2, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["Figure2ABDE"]] %>%
+  dplyr::filter(Fig == c("Fig2B")) %>%
+  ### values are already log10
+  dplyr::mutate(log10_value = value_raw,
+                group = ifelse(grepl("top",Fig),"nofill","fill"),
+                ### to add spaces in x axis
+                TimePoint1 = TimePoint,
+                TimePoint2 = factor(TimePoint, unique(dplyr::filter(list_of_datasets[["Figure2ABDE"]],Fig == c("Fig2B"))$TimePoint)),
+                TimePoint = factor(ifelse(TimePoint1 == "V2_wk2",as.numeric(TimePoint2)+2,
+                                   ifelse(TimePoint1 == "V2_w10",as.numeric(TimePoint2)+3,
+                                          ifelse(TimePoint1 == "V2_w42",as.numeric(TimePoint2)+5,
+                                                 ifelse(TimePoint1 == "V2_w78",as.numeric(TimePoint2)+8,
+                                                        ifelse(TimePoint1 == "V2_w90",as.numeric(TimePoint2)+11,
+                                                               as.numeric(TimePoint2)+13))))),seq(0,19,1))
+  )
+
+colors_df <- data.frame("panel"=c("Fig2B"),
+                        "color"=c("darkblue"))
+fill_df <- data.frame("group"=c("nofill","fill"),
+                      "fill"=c("white","#B4C0FF")) %>%
+  column_to_rownames("group")
+
+y_limits <-c(0,0.5)
+y_breaks <- c(seq(0,0.5,0.1))
+
+### breaks are contigous points
+x_limits <- seq(0,19,1)
+###
+x_labels_df <- data.frame("TimePoint"=seq(0,19,1)) %>%
+  dplyr::mutate(TimePoint = factor(TimePoint,seq(0,19,1))) %>%
+  ## add in actual labels
+  dplyr::left_join(unique(data_to_use[,c("TimePoint1","TimePoint")]), by = "TimePoint") 
+x_labels <- x_labels_df$TimePoint1 %>%
+                       str_after_first("_") 
+x_labels[is.na(x_labels)] <- ""
+
+### To name output files
+contrast_name <- "Fig2B"
+
+num_columns_for_plot <- 1
+```
+
+
+```{r scatterplots_withBox__Fig2B, ref.label=c('scatterplots_withBox'), results='asis',fig.height=3, fig.width=6}
+```
+
+### Fig 2C
+
+```{r prep_Fig2C}
+
+##### select data
+data_to_use <- list_of_datasets[["Figure2C"]] %>%
+  ### add treatment group
+  dplyr::left_join(list_of_datasets[["Figure1BDEF"]] %>%
+                     dplyr::filter(Fig == c("figure1F")) %>%
+                     ### add useful treatment
+                     dplyr::mutate(Treatment = ifelse(grepl("L",TimePoint),"DNA_LION",
+                                                      ifelse(endsWith(TimePoint,"2D"),"DNA_IM",
+                                                             ifelse(grepl("EP",TimePoint),"DNA_EP","DNA_EPplus")))) %>%
+                     dplyr::select(MacaqueID,Treatment) %>%
+                     unique(),
+                   by = "MacaqueID"
+                     ) 
+ 
+
+### To name output files
+contrast_name <- "Fig2C"
+
+num_columns_for_plot <- 1
+```
+
+
+```{r StackedBarplots__Fig2C, results='asis', fig.height=6, fig.width=7}
+list_of_plots <- list()
+## for each analyte of interest
+for(i in unique(data_to_use$Fig)){
+ phen_to_plot <- data_to_use %>%
+    dplyr::filter(Fig == i) %>%
+   dplyr::mutate(Treatment = factor(Treatment, c("DNA_LION","DNA_IM","DNA_EP","DNA_EPplus")),
+                 CellType = factor(CellType, c("CD8","CD4")))
+
+   #### base plot
+  p <- ggplot(phen_to_plot, aes(x = MacaqueID, y = value_raw, fill = CellType)) +
+    scale_fill_manual(values = c("black","white"))+
+    geom_bar(position="stack", stat="identity", color = "black")+
+    facet_wrap(~Treatment, 
+               strip.position  = "bottom", ## treatment lables are at the bottom
+               scales = "free_x", ## don't force the same x ticks in all treatments
+               nrow = 1) +
+    scale_y_continuous(limits = c(0,3),
+                       breaks = c(0,0.3,0.6,0.9,2,3))+
+       theme_bw()+
+  theme(strip.placement = "outside",
+        strip.background = element_rect(fill = NA, color = "white"),
+        panel.spacing = unit(-.01,"cm"),
+        panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+        axis.title.x = element_blank(),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+        
+
+  
+ 
+    list_of_plots[[i]] <- p   
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+```
+
+
+### Fig 2DE
+
+```{r prep_Fig2DE}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- c("Fig2D","Fig2E")
+
+##### select data
+data_to_use <- list_of_datasets[["Figure2ABDE"]] %>%
+  ### filter to only vars of interes
+  dplyr::filter(grepl(paste(curr_figure_name, collapse = '|'),Fig)) %>%
+  dplyr::mutate(Fig = str_replace_all(Fig, " ","_")) 
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::mutate(log2_value = log2(value_raw + as.double(prior_to_use)),
+                value_raw = NULL
+                
+                ) %>%
+  dplyr::rename(variable = Fig)
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("w2","w3","w3"),
+  "time2"=c("V4","V4","w2")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+
+timepoints_x_order <- c("V4","w2","w3")
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig2DE"
+#contrast_name <- "Fig5D_Myeloid_vsD1"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 2
+
+```
+
+```{r differential_expression_Fig2DE, ref.label=c('differential_expression')}
+```
+
+```{r scatterplots_with_pvalues___Fig2DE, results='asis', fig.height=5, fig.width=6}
+ 
+### set up p-values: rowname (comp_var), contrast, log2FC, pval, adjpval
+pval_df_trimmed <- list_of_stats[[paste0(contrast_name)]] %>%
+  ###make longer
+  tidyr::pivot_longer(cols=!rowname, names_to = "contrast_test", values_to = "value") %>%
+  dplyr::mutate(test = str_after_first(contrast_test,"_"),
+                contrast = str_before_first(contrast_test,"_"),
+                contrast_test = NULL) %>%
+  tidyr::pivot_wider(names_from = "test",values_from = "value") %>%
+  data.frame()
+
+list_of_pvals <- list()
+## for each analyte of interest
+for(i in unique(data_to_use$Fig)){
+
+  pval_df <- tibble::tribble(~group1, ~group2, ~p, ~est, ~dir)
+  for (g in 1:nrow(TimePoints_to_compare)){
+    
+    #### only if have the timepoints
+    if(dim(pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),])[1] > 0){
+        ### tribble
+    curr_df <- tibble::tribble(~group1, ~group2, ~p, ~est,
+                               TimePoints_to_compare[g,"time1"],TimePoints_to_compare[g,"time2"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"pval"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"log2FC"]
+                               ) %>%
+      ### add dir
+      dplyr::mutate(dir = ifelse(p < params$pCutoff, 
+                                   ifelse(est > 0, "up","down"),
+                                   "not_sig"),
+                    ### set sig figs
+                    p = signif(p,3)) 
+      
+      
+    
+    pval_df <- add_row(pval_df, curr_df)
+
+    }else{
+      pval_df <- pval_df
+    }
+     }
+  list_of_pvals[[paste0(i)]] <- pval_df
+}
+
+
+list_of_plots <- list()
+## for each analyte of interest
+for(i in unique(data_to_use$Fig)){
+ phen_to_plot <- data_to_use %>%
+    dplyr::filter(Fig == i)
+  
+  # cat("##### ",paste0(i," "),"\n")
+  # cat("\n")
+  max_y <- max(phen_to_plot$value_raw, na.rm=TRUE)
+  min_y <- min(phen_to_plot$value_raw, na.rm=TRUE)
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(TimePoints_to_compare),
+                          length(which(list_of_pvals[[paste0(i)]][,"p"] < 0.05))
+  )
+  maxy_y_to_plot <- ifelse(plot_sig_only =="no",
+                                  max_y*(1+0.1*(num_contrasts+1)),
+                                  max_y*(1+0.1*(num_contrasts+1))
+                                         
+                                         )
+  
+  # color_df <- data.frame("variable"=levels(phen_to_plot$variable),
+  #                        
+  #                        "fill"=c("#929292","#008F00","#008EF1"))
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = TimePoint, y = value_raw)) + 
+#        scale_color_manual(values=c(color_df$fill[which(color_df$variable == str_after_first(i,"__"))])) +  
+
+     geom_beeswarm(#aes(color=variable), 
+                   size = 2, shape=16, alpha=0.8, cex = 3)+
+  scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot)
+                     )+
+    labs(y = paste0(i))+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_text(size = 10), ### make smaller to fit
+            axis.title.x = element_blank())
+  
+  
+  
+  box_pval_cut <- 0.05
+  
+  ##### add p values
+  
+  ### if plotting all p
+if(plot_sig_only == "no"){
+
+  
+  for(l in 1:num_contrasts){
+     p <- p +
+        stat_pvalue_manual(list_of_pvals[[i]][l,], label = "p",size = 2.5,
+                           y.position = max_y+0.1*l*range_y, 
+                           bracket.size = 0.2, tip.length = 0)
+  }
+  
+}else{
+ 
+  # if there are any sig contrasts
+  if(num_contrasts > 0){
+     ## trim to sig contrasts
+        sig_pvals <- list_of_pvals[[i]][which(list_of_pvals[[i]][,"p"]  < 0.05),] %>%
+          ### add name
+        dplyr::left_join(TimePoints_to_compare, by =c("group1","group2"))
+        
+    for(l in 1:nrow(sig_pvals)){
+     # if(pval_combined[which(rownames(pval_combined) == i),paste0(sig_comp_pairs_df$name[l])] < as.double(box_pval_cut)){
+        p <- p +
+          stat_pvalue_manual(sig_pvals[l,], label = "p",size = 2.5,
+                             y.position = max_y+0.1*l*range_y, bracket.size = 0.2, tip.length = 0)
+                             
+    #  }else{
+    #    p <- p
+    #  }
+        }
+      
+      
+  }else{
+    p <- p
+  }   
+
+  
+}
+    
+ 
+  # plot(p)
+  list_of_plots[[i]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+### reorder list
+list_of_plots_ordered <- list()
+list_of_plots_ordered[[1]] <- list_of_plots[[1]]
+list_of_plots_ordered[[2]] <- list_of_plots[[3]]
+list_of_plots_ordered[[3]] <- list_of_plots[[2]]
+list_of_plots_ordered[[4]] <- list_of_plots[[4]]
+
+do.call("grid.arrange",c(grobs = list_of_plots_ordered, ncol=num_columns_for_plot))
+
+```
+
+### Fig 2F 
+
+```{r prep_Fig2F}
+
+##### select data
+data_to_use <- list_of_datasets[["Figure2F"]] %>%
+  ### calculate averages
+  group_by(Fig,Markers,TimePoint) %>%
+  dplyr::summarise(mean = mean(value_raw, na.rm = TRUE))
+
+
+### To name output files
+contrast_name <- "Fig2F"
+
+num_columns_for_plot <- 1
+```
+
+
+```{r StackedBarplots__Fig2F, results='asis', fig.height=6, fig.width=4}
+list_of_plots <- list()
+## for each analyte of interest
+for(i in rev(sort(unique(data_to_use$Fig)))){
+ phen_to_plot <- data_to_use %>%
+    dplyr::filter(Fig == i) %>%
+   dplyr::mutate(Markers = factor(Markers, c(
+     "EOMES+ T-bet-",
+     "EOMES- T-bet-",
+     "EOMES+ T-bet+",
+     "EOMES- T-bet+")),
+                 TimePoint = factor(TimePoint, c("V4","V4w2","V4w3")))
+
+   #### base plot
+  p <- ggplot(phen_to_plot, aes(x = TimePoint, y = mean, fill = Markers)) +
+    scale_fill_manual(values = c("#919191","#A9A9A9","#00849D","#7AE4EF"))+
+    geom_bar(position="stack", stat="identity", color = "black")+
+  
+       theme_bw()+
+  theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"))
+        
+
+  
+    list_of_plots[[i]] <- p   
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+```
+
+
+
+## Figure 3 {.tabset}
+
+### Fig3A {.tabset}
+
+MSD for DNA/LION Vaccination V1 D1+4hr & D1+24hr
+
+
+```{r prep_Fig3A}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only V1 D1, D1_1hr, D2
+  dplyr::filter(vaccine == "DNA_LION" &
+                  vax_dose == "V1" &
+                  Day %in% c("D1","D1_4h","D2")
+                  ) 
+
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_last(sampleName,"__"),
+                sampleName = NULL
+                ) 
+
+# id_var_of_interest <- "sampleName"
+# var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+# ## designate covariates with Day related first, then id
+# covariates=c("Day","MacaqueID")
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("V1_D1_4h","V1_D2"),
+  "time2"=c("V1_D1","V1_D1")
+)
+
+## names for panels (one per row of TimePoints_to_compare)
+panel_names <- c("+4hr vs D1 (top)","+24hr vs D1 (bottom)")
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig3A_MSD_V1"
+```
+
+
+```{r differential_expression}
+#### try glm
+
+curr_df <- curr_df_long %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "variable", values_from = "log2_value") 
+
+
+
+  ## prep pvaldf
+  p_value_df2 <- data.frame("rowname" = unique(curr_df_long$variable))
+  
+  for (npt in 1:dim(TimePoints_to_compare)[1]){
+    
+    ### select animals with both timepoints
+    animal_df <- as.data.frame.matrix(table(curr_df$MacaqueID, curr_df$TimePoint)) %>%
+      dplyr::select(!!!rlang::syms(c(TimePoints_to_compare$time2[npt],TimePoints_to_compare$time1[npt]))) %>%
+      ## rename to generic
+      dplyr::rename(time2=1, time1=2) %>%
+      dplyr::mutate(combo = (time2+time1)) %>%
+      dplyr::filter(combo ==2) %>%
+      rownames_to_column()
+ 
+      
+     #trim to only the 2 TimePoints, will remove vars without these TimePoint
+      curr_df2 <- curr_df %>% 
+        # only animals with both timepoints
+        dplyr::filter(MacaqueID %in% animal_df$rowname) %>%
+
+        # only rows with time1 or time2
+        dplyr::filter(TimePoint %in% c(TimePoints_to_compare$time1[npt],TimePoints_to_compare$time2[npt])) %>% 
+        ## remove variables with all na
+        dplyr::select(where(function(x) !all(is.na(x)))) %>%
+        #### prep for glm
+        dplyr::mutate(TimePoint_f = factor(TimePoint, c(TimePoints_to_compare$time2[npt],TimePoints_to_compare$time1[npt])),
+                      ID_f = factor(MacaqueID)) %>%
+        dplyr::arrange(ID_f)
+      
+         ### select variables with both TimePoints
+    curr_vars <- colnames(curr_df2)[-which(colnames(curr_df2) %in% c("MacaqueID","TimePoint","TimePoint_f","ID_f"))]
+
+      
+
+      ######## get rid of columns that don't have data for both timepoints
+           ######### only for columns that are not all NAs
+      NA_columns_tp1 <- curr_df2[which(curr_df2$TimePoint == TimePoints_to_compare$time1[npt]),] %>% keep(~all(is.na(.x))) %>% names #https://www.statology.org/r-find-columns-with-all-na/
+      NA_columns_tp2 <- curr_df2[which(curr_df2$TimePoint == TimePoints_to_compare$time2[npt]),] %>% keep(~all(is.na(.x))) %>% names   
+      ####### also remove columns with all zeros for both timepoints
+      allZero_columns <- which(colSums(curr_df2[,intersect(colnames(curr_df2),curr_vars)]) == 0) %>% names
+      
+      ####### finally, remove columns with no animals that have both timepoints
+      noOverlap_columns <- c()
+      for(curr_v in intersect(colnames(curr_df2),curr_vars)){
+        animals_tp1 <- curr_df2[which(curr_df2$TimePoint == TimePoints_to_compare$time1[npt]),c("MacaqueID",curr_v)] %>%
+          dplyr::filter(!is.na(!!rlang::sym(curr_v)))
+        animals_tp2 <- curr_df2[which(curr_df2$TimePoint == TimePoints_to_compare$time2[npt]),c("MacaqueID",curr_v)] %>%
+          dplyr::filter(!is.na(!!rlang::sym(curr_v)))
+        if(length(intersect(animals_tp1$MacaqueID,animals_tp2$MacaqueID)) == 0){
+          noOverlap_columns <- c(noOverlap_columns,curr_v)
+        }else{
+          noOverlap_columns <- noOverlap_columns
+        }
+        
+      }
+      
+      nonNA_columns <- setdiff(setdiff(setdiff(setdiff(curr_vars, NA_columns_tp1), NA_columns_tp2),allZero_columns),noOverlap_columns)
+      
+      ### if there are any columns with data for both TimePoints, compute for those columns
+      if(length(nonNA_columns)>0){
+        new_variable_mat_prep <- data.frame(as.matrix(data.matrix(curr_df2[,nonNA_columns])))
+          
+        colnames(new_variable_mat_prep) <- nonNA_columns
+        new_variable_mat <- new_variable_mat_prep %>%
+          ### remove if all have identical value
+          select(where(~n_distinct(.) > 1)) %>%
+          as.matrix(.)
+        
+        ##### glm not giving sensical for BAMA ---> need to log10
+        curr_p_raw <- apply(new_variable_mat, 2, function(x) coef(summary(geeglm(scale(x) ~ TimePoint_f, id=ID_f, data = curr_df2, family="gaussian", corstr="exchangeable")))[2,'Pr(>|W|)'])
+        curr_p_adj <- p.adjust(curr_p_raw, method = 'BH')
+        curr_est <- apply(new_variable_mat, 2, function(x) coef(summary(geeglm(scale(x) ~ TimePoint_f, id=ID_f, data = curr_df2, family="gaussian", corstr="exchangeable")))[2,'Estimate'])
+
+        #### no singular errors = good!
+
+            
+        
+        curr_p_df <- data.frame(curr_est, curr_p_raw, curr_p_adj) %>%
+          rownames_to_column()
+        
+        colnames(curr_p_df) <- c("rowname",
+                                 paste0(TimePoints_to_compare$time1[npt],"-",
+                                        TimePoints_to_compare$time2[npt],"_log2FC"),
+                                 paste0(TimePoints_to_compare$time1[npt],"-",
+                                        TimePoints_to_compare$time2[npt],"_pval"),
+                                 paste0(TimePoints_to_compare$time1[npt],"-",
+                                        TimePoints_to_compare$time2[npt],"_adjpval"))
+        
+        
+        
+        ###### if there are no columns with nonNA data for this TimePoint, then add nothing
+      }else{
+        curr_p_df <- data.frame("rowname"=curr_vars,
+                                "est"=NA, 
+                                "pval"=NA,
+                                "adjpval"=NA) 
+        colnames(curr_p_df) <- c("rowname",
+                                 paste0(TimePoints_to_compare$time1[npt],"-",
+                                        TimePoints_to_compare$time2[npt],"_log2FC"),
+                                 paste0(TimePoints_to_compare$time1[npt],"-",
+                                        TimePoints_to_compare$time2[npt],"_pval"),
+                                 paste0(TimePoints_to_compare$time1[npt],"-",
+                                        TimePoints_to_compare$time2[npt],"_adjpval"))
+        
+      }
+      
+      
+      p_value_df2 <- dplyr::full_join(p_value_df2, curr_p_df, by="rowname")
+      
+      
+  
+  }
+  
+
+
+### save stats to list
+list_of_stats[[paste0(contrast_name)]] <- p_value_df2
+```
+
+
+NOTE some p values equal to zero, set to `r as.double(params$prior_for_volcano_p)` in stats table for plotting
+
+
+```{r volcanoPlots, results='asis', fig.height=5, fig.width=6}
+
+#### first updata the stats to have 1e-18 for zeros
+p_value_df2 <- p_value_df2 %>%
+  dplyr::mutate(`V1_D1_4h-V1_D1_pval` = ifelse(`V1_D1_4h-V1_D1_pval` == 0,
+                                               as.double(params$prior_for_volcano_p),
+                                               `V1_D1_4h-V1_D1_pval`),
+                `V1_D2-V1_D1_pval` = ifelse(`V1_D2-V1_D1_pval` == 0,
+                                               as.double(params$prior_for_volcano_p),
+                                               `V1_D2-V1_D1_pval`))
+list_of_stats[[paste0(contrast_name)]] <- p_value_df2
+
+### generate contrasts
+curr_contrasts <- c()
+for(npt in 1:nrow(TimePoints_to_compare)){
+  cont <- paste0(TimePoints_to_compare$time1[npt],"-",TimePoints_to_compare$time2[npt])
+  curr_contrasts <- c(curr_contrasts,cont)
+}
+
+for(i in seq_along(curr_contrasts)){
+  c <- curr_contrasts[i]
+  label.col <- "rowname"
+  sig.col <- paste0(c,raw_or_adj)
+  lfc.col <-paste0(c,"_log2FC")
+  columns_of_interest <- c(label.col,lfc.col,sig.col)
+  
+  res.sub <- p_value_df2 %>% dplyr::select(one_of(columns_of_interest)) %>% dplyr::filter(!is.na(!!rlang::sym(lfc.col))) 
+  
+  change_lfc_name <- "log2FC"
+  if(raw_or_adj == "_pval"){
+    change_sig_name <- "raw-p"
+  }else{
+    change_sig_name <- "FDR"
+  }
+  
+  colnames(res.sub) <- c(label.col,change_lfc_name,change_sig_name)
+  
+  cat(paste0("#### ",panel_names[i],"\n"))
+   #Select top genes by logFC or Significance
+  no_genes_to_label <- 30
+  value_to_sort_the_output_dataset <- "p-value"
+  if (value_to_sort_the_output_dataset=="fold-change") {
+    res.sub %>% dplyr::arrange(desc(abs(!!rlang::sym(change_lfc_name)))) -> res.sub
+  } else if (value_to_sort_the_output_dataset=="p-value") {
+    res.sub %>% dplyr::arrange(!!rlang::sym(change_sig_name)) -> res.sub
+  }
+  genes_to_label <- as.character(res.sub[1:no_genes_to_label,label.col])
+  
+  additional_labels <- ""
+  additional_labels <- unlist(str_split(additional_labels,","))
+  filter <- additional_labels %in% res.sub[,label.col]
+  additional_labels <- additional_labels[filter]
+  missing_labels <- additional_labels[!filter]
+  
+  if(!is.na(missing_labels)){
+    cat("Could not find:\n")
+    print(missing_labels)
+  }
+  use_only_addition_labels <- FALSE
+  if(use_only_addition_labels){
+    genes_to_label <- additional_labels
+  }else{
+    genes_to_label <- unique(append(genes_to_label, additional_labels))
+  }
+  
+  
+  pCutoff  = 0.05
+  FCcutoff = 1.0
+  
+  significant=as.vector(table(abs( res.sub[,change_lfc_name] ) > FCcutoff &
+                                res.sub[,change_sig_name]   < pCutoff))[2]
+  
+  # fix pvalue == 0
+  shapeCustom <- rep(19,nrow(res.sub))
+  maxy <-  max(-log10(res.sub[[change_sig_name]]), na.rm=TRUE)
+  if(0 > 0){
+    maxy <- 0
+  }
+  
+  #cat(paste0("Maxy: ",maxy,"\n"))
+  if(maxy == Inf){
+    # Sometimes, pvalues == 0
+    keep <- res.sub[[change_sig_name]] > 0
+    res.sub[[change_sig_name]][!keep] <- min(res.sub[[change_sig_name]][keep])
+    shapeCustom[!keep] <- 17
+    
+    maxy <- -log10(min(res.sub[[change_sig_name]][keep]))
+    cat("Some p-values equal zero. Adjusting y-limits.\n")
+    cat(paste0("Maxy adjusted: ",maxy,"\n"))
+    
+  }
+  
+  # By default, nothing will be greater than maxy. User can set this value lower
+  keep <- -log10(res.sub[[change_sig_name]]) <= maxy
+  res.sub[[change_sig_name]][!keep] <- maxy
+  shapeCustom[!keep] <- 17
+  
+  names(shapeCustom)<- rep("Exact",length(shapeCustom))
+  names(shapeCustom)[shapeCustom == 17] <- "Adjusted"
+  
+  #Remove if nothin' doin'
+  if(all(shapeCustom == 19)){
+    shapeCustom <- NULL
+  }
+  
+  maxy <- ceiling(maxy)
+  
+  use_custom_xlab <- FALSE
+  if(use_custom_xlab){
+    xlab <- gsub("_"," ",change_lfc_name)
+  }else{
+    xlab <- bquote(~Log[2]~ "fold change")
+  }
+  
+  xlim_additional <- 0
+  ylim_additional <- 0
+  axisLabSize <- 12
+  legendSize <- 10
+  labSize <- 3
+  
+  imageWidth = 3000
+  imageHeight = 3000
+  dpi = 300
+  
+  ####### enhancedvolcano became unusable 9/28/23
+  ### add column for signif
+  res.sub <- res.sub %>%
+    mutate(Significant = ifelse(.data[[change_sig_name]] < pCutoff,
+                                ifelse(abs(.data[[change_lfc_name]]) > FCcutoff, "p-value and log2FC","p-value"),
+                                ifelse(abs(.data[[change_lfc_name]]) > FCcutoff, "log2FC","NS")),
+           Sig_f = factor(Significant,c("NS","log2FC","p-value","p-value and log2FC")))
+  
+  color_df <- data.frame("category"=c("NS","log2FC","p-value","p-value and log2FC"),
+                         "colors"=c("grey60", "forestgreen", "royalblue","red"))
+  colors_to_use <- color_df$colors[which(color_df$category %in% unique(res.sub$Sig_f))]
+  
+p <- ggplot(res.sub,aes(.data[[change_lfc_name]],-log10(.data[[change_sig_name]]),color=Sig_f, fill=Sig_f, label=.data[[label.col]])) +
+  geom_point(size = 1, shape = 21, alpha = 0.8) + 
+  theme_bw()  +
+  geom_text_repel(max.overlaps = 20, size = labSize)+
+  geom_hline(yintercept = -log10(pCutoff),linetype="dashed") +
+  geom_vline(xintercept = c(-FCcutoff,FCcutoff),linetype="dashed") +
+  #scale_x_continuous(limits = c(-15,15))+
+  scale_color_manual(values=colors_to_use)+
+  scale_fill_manual(values=colors_to_use)+
+  theme(legend.position="top", axis.title = element_text(size=axisLabSize), axis.text = element_text(size=axisLabSize), 
+        legend.title = element_blank(), legend.text = element_text(size=legendSize),
+        
+        panel.border = element_blank(), axis.line = element_line(colour = "black", size = 0.5),
+        axis.ticks = element_line(size = 0.5), axis.ticks.length = unit(.25,"cm"),
+        plot.title = element_text(size = axisLabSize, face = "bold"),
+        plot.caption = element_text(size = legendSize)) +
+  scale_size(guide = 'none')+ ### remove the size from legend
+  guides(color = guide_legend(override.aes = list(size=1)),
+         fill = guide_legend(override.aes = aes(label = "")))+ 
+  labs(title = paste0("(Significant=",length(which(res.sub$Significant == "p-value and log2FC")),")"),
+              caption = paste0("total = ", dim(res.sub)[1], " variables"))
+  
+
+
+
+  print(p)
+  
+  
+ cat("\n")
+cat(' \n \n') ### this is the key!
+
+}
+ cat("\n")
+cat(' \n \n') ### this is the key!
+
+
+```
+
+
+### Fig 3B {.tabset}
+
+MSD for DNA/LION Vaccination V4 x D2,D3,D4,D8,D15,D22 vs D1
+
+
+```{r prep_Fig3B}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only V1 D1, D1_1hr, D2
+  dplyr::filter(vaccine == "DNA_LION" &
+                  vax_dose == "V4" &
+                  Day %in% c("D1","D2","D3","D4","D8","D15","D22")
+                  ) 
+
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_last(sampleName,"__"),
+                sampleName = NULL
+                ) 
+
+# id_var_of_interest <- "sampleName"
+# var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+# ## designate covariates with Day related first, then id
+# covariates=c("Day","MacaqueID")
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("V4_D2","V4_D3","V4_D4","V4_D8","V4_D15","V4_D22"),
+  "time2"=c("V4_D1","V4_D1","V4_D1","V4_D1","V4_D1","V4_D1")
+)
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig3B_MSD_V4"
+```
+
+
+```{r differential_expression_Fig3B, ref.label=c('differential_expression')}
+```
+
+
+
+```{r Log2FCest_heatmaps_setup_Fig3B}
+### read in degs results
+degs_df <- list_of_stats[["Fig3B_MSD_V4"]]
+
+
+degs_df_for_hm <- degs_df[,c("rowname",colnames(degs_df)[grepl("log2FC",colnames(degs_df))])] %>%
+  column_to_rownames() %>%
+  ### remove rows with all na
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  `colnames<-`(str_remove_all(str_remove_all(colnames(.),"-V4_D1_log2FC"),"V4_")) %>%
+  ## sort
+  rownames_to_column() %>%
+  arrange(rowname) %>%
+  column_to_rownames()
+
+
+timepoint_factor_order <- c("D2","D3","D4","D8","D15","D22")
+
+
+############### annotation colors (set number of dirs)
+annotation_colors <-  list(Day = c(D2="grey20",D3="grey40",D4="grey60",D8="grey80",D15="grey90",D22="grey100"),
+                           dir1 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir2 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir3 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir4 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir5 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir6 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"))
+
+names(annotation_colors[["Day"]]) <- timepoint_factor_order
+names(annotation_colors) <- c("Day",paste0(timepoint_factor_order,"vsD1_dir"))
+
+
+######### annotation for columns
+annotation_col <- data.frame("contrast"= colnames(degs_df_for_hm)) %>%
+  mutate(Day=factor(contrast, timepoint_factor_order)) %>%
+  arrange(Day) %>%
+  column_to_rownames("contrast")
+
+
+
+############## add row annotation with sig change for FC
+
+### generate contrasts
+curr_contrasts <- c()
+for(npt in 1:nrow(TimePoints_to_compare)){
+  cont <- paste0(TimePoints_to_compare$time1[npt],"-",TimePoints_to_compare$time2[npt])
+  curr_contrasts <- c(curr_contrasts,cont)
+}
+
+annotation_row1 <- data.frame("rowname"=degs_df$rowname)
+for(curr_contrast in rev(curr_contrasts)){
+### trim to curr contrast
+  curr_pval_df <- degs_df[,c("rowname",colnames(degs_df)[grepl(curr_contrast,colnames(degs_df))])]
+  ### rename column names to be generic
+  orig_names <- colnames(curr_pval_df)
+  simp_names <- ifelse(grepl("_",orig_names),str_after_last(orig_names,"_"),orig_names)
+  colnames(curr_pval_df) <- simp_names
+  curr_pval_df <- curr_pval_df %>%
+    dplyr::mutate(dir = ifelse(pval < as.double(params$pCutoff),
+                               ifelse(log2FC > as.double(params$FCcutoff),"up", ifelse(log2FC > 0, "up_p_only",
+                                      ifelse(log2FC < (-1)*as.double(params$FCcutoff),"down",ifelse(log2FC < 0, "down_p_only","p_only")))),"not_sig"))
+  curr_df <- curr_pval_df[,c("rowname","dir")] %>%
+    dplyr::mutate(dir = factor(dir, c("up","up_p_only","not_sig","down_p_only","down")))
+  colnames(curr_df) <- c("rowname",paste0(str_remove_all(str_replace_all(curr_contrast,"-","vs"),"V4_"),"_dir"))
+  
+  annotation_row1 <- dplyr::left_join(annotation_row1,curr_df, by = "rowname")
+}
+
+#### make rownames
+annotation_row <- column_to_rownames(annotation_row1)
+### sort
+curr_ann_row <- dplyr::arrange(annotation_row[rownames(degs_df_for_hm),],  annotation_row[rownames(degs_df_for_hm),rev(colnames(annotation_row))])
+
+
+```
+
+```{r Log2FCest_heatmaps, results = 'asis', fig.height=7, fig.width=6}
+mycols = diverging_hcl(n=100, palette="Blue-Red 3")
+scale_range = 2
+breakscale <- seq(-1*scale_range, scale_range, length=100)
+
+
+
+  
+
+p <- pheatmap(degs_df_for_hm[rownames(curr_ann_row),rownames(annotation_col)], scale="none", col = mycols,
+                breaks=breakscale, clustering_method="ward.D2",
+                #gaps_col = gaps_to_use, 
+              border_color = NA,
+                cluster_rows = FALSE, cluster_cols = FALSE,
+                annotation_col = annotation_col,show_colnames = FALSE,
+              annotation_row = curr_ann_row,
+                annotation_colors = annotation_colors
+)
+p
+
+
+  cat("\n")
+cat(' \n \n') ### this is the key!
+
+
+ 
+```
+
+
+### Fig 3C {.tabset}
+
+MSD for DNA/LION Vaccination V4 D2vsD1, Spearman association among analyte response
+
+```{r prep_Fig3C}
+
+prior_to_use <- 0
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only V1 D1, D1_1hr, D2
+  dplyr::filter(vaccine == "DNA_LION" &
+                  vax_dose == "V4" &
+                  Day %in% c("D1","D2")
+                  ) %>%
+     ### simplify sampleName
+   dplyr::mutate(sampleName = str_remove_all(sampleName,"DNA_LION__V4_")) 
+
+
+
+
+########## generate "dataset" format - wide, no metadata with columns = samples (including vax, timepoint, animal), rows = analytes
+##### has analyte names as rownames AND as column labeled gene
+df <- data_to_use %>%
+  ### remove metadata
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer to log2
+  tidyr::pivot_longer(cols=!sampleName, names_to = "analyte", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL) %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "sampleName", values_from = "log2_value") %>%
+  dplyr::mutate(Gene=analyte) %>%
+  column_to_rownames("analyte") %>%
+  relocate(Gene)
+
+
+cytokine_columns <- rownames(df)
+
+
+## generate metadata only
+targetfile_full <- data_to_use %>%
+  ### remove data columns
+  dplyr::select(-all_of(cytokine_columns))
+
+id_var_of_interest <- "sampleName"
+var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+## designate covariates with Day related first, then id
+covariates=c("Day","MacaqueID")
+
+contrasts <- c("D2-D1")
+
+contrast_name <- "Fig3C_MSD_V4_D2vsD1"
+contrast <- "D2-D1$"
+contrast_simp <- "DNA_LION_V4_D2vsD1"
+```
+
+```{r diff_counts_calcs, include = FALSE}
+## select which samples from annotation that are in the df (all in this case)
+annot <- targetfile_full %>% filter(!!rlang::sym(id_var_of_interest) %in% colnames(df))
+
+
+for(n in seq_along(contrasts)){
+  c <- contrasts[n]
+  print(c)
+  test <- unlist(str_split(c,"-"))[1]
+  ref  <- unlist(str_split(c,"-"))[2]
+  
+  ## generate dataframes with only contrast n
+  annot.c <- annot %>% filter(!!rlang::sym(var_of_interest) %in% c(test,ref))
+  samples_in_contrast <- annot.c[,id_var_of_interest]
+  
+  #### df.c has genes in rows, samples in columns
+  df.c <- df[ , c("Gene",samples_in_contrast)]
+  row.names(df.c) <- df$Gene
+  df.c$Gene <- NULL
+  
+  ## designate test/reference samples
+  test.samples <- annot.c %>% filter(!!rlang::sym(var_of_interest) %in% test) %>% pull(!!rlang::sym(var_of_interest) )
+  ref.samples  <- annot.c %>% filter(!!rlang::sym(var_of_interest) %in% ref)  %>% pull(!!rlang::sym(var_of_interest) )
+  
+  #### df.t has samples in rows, genes in columns
+  df.t <- as.data.frame(t(df.c))
+  
+  df.t$MacaqueID <- apply(array(row.names(df.t)),1,function(z) annot[which(annot[,id_var_of_interest] == z), "MacaqueID"])
+  
+  ####### df.ret has genes in rows, sample contrasts in columns
+  df.ret <- as.data.frame(matrix(nrow=length(row.names(df.c)),ncol=length(unique(df.t$MacaqueID)),dimnames=list(row.names(df.c),paste0("F",unique(df.t$MacaqueID),"__",test,"-",ref))))
+  
+  for(i in 1:nrow(df.ret)){
+    gene <- row.names(df.ret)[i]
+    for(j in 1:ncol(df.ret)){
+      col.nam <- colnames(df.ret)[j]
+      MacaqueID <- unlist(str_before_nth(col.nam,"__",1))
+      contrast <- unlist(str_after_nth(col.nam,"__",1))
+      t.level <- unlist(str_split(contrast,"-"))[1]
+      r.level <- unlist(str_split(contrast,"-"))[2]
+      
+      test.sample <- paste0(MacaqueID,"__",t.level)
+      ref.sample  <- paste0(MacaqueID,"__",r.level)
+      
+      #Do we actually have both levels?
+      if(!all(c(test.sample,ref.sample) %in% row.names(df.t))){
+        df.ret[i,j] <- NA
+        next
+      }
+      
+      #Are either NA?
+      if( is.na(df.t[test.sample,gene]) | is.na(df.t[ref.sample,gene]) ){
+        df.ret[i,j] <- NA
+        next                
+      }
+      
+      #### MSD_V4 is already log2
+      if(length(which(grepl("MSD",contrast_name) == TRUE) > 0)){
+        df.ret[i,j] <- df.t[test.sample,gene] - df.t[ref.sample,gene]
+        
+      }else{
+        ############ if using raw values
+        if(params$log2_or_raw == "value_raw"){
+          #### AB is in log form
+          if(grepl("Antibody_titer",gene)){
+            df.ret[i,j] <- df.t[test.sample,gene] - df.t[ref.sample,gene]
+            #### but if its other raw value
+          }else{
+            df.ret[i,j] <- (df.t[test.sample,gene] + as.numeric(params$prior_for_log)) / (df.t[ref.sample,gene] + as.numeric(params$prior_for_log))
+          }
+          ##### if using logged values
+        }else{
+          
+            df.ret[i,j] <- df.t[test.sample,gene] - df.t[ref.sample,gene]
+          
+          
+        }
+        
+      }
+      
+      
+      
+    }
+  }
+  
+  df.ret <- df.ret %>% rownames_to_column("Gene")
+  if(n == 1){
+    diff_counts <- df.ret
+  }else{
+    diff_counts <- dplyr::full_join(diff_counts,df.ret,by="Gene")
+  }
+}
+
+
+
+diff_counts <- diff_counts %>%
+  ## remove columns with all NAs
+  select_if(~ !all(is.na(.))) 
+
+list_of_diff_counts[[paste0(contrast_name)]] <- diff_counts
+```
+
+```{r SpearmanCorrleation, results='asis', fig.height=8, fig.width=8}
+ df_original <- diff_counts
+
+
+  sample_of_interest <- grep(contrast, colnames(df_original), value=TRUE)
+
+  df1 <- df_original %>% select(Gene,one_of(sample_of_interest))
+  row.names(df1) <- df1$Gene
+  df1$Gene <- NULL
+
+  df <- as.data.frame(t(as.matrix(df1)))
+
+  # Remove
+  #remove bad columns
+  # filter <- apply(df, 2, function(z) all(is.na(z))) #remove if all NAs
+  # df <- df[,!filter]
+  filterNA <- apply(df, 2, function(z) any(is.na(z))) #remove if any NAs - better to remove one assay than half the samples
+  removedNA <- colnames(df)[which(filterNA)]
+  df <- df[,!filterNA]
+  removed0 <- ""
+  if(length(which(colSums(df)==0)) >0){
+    filter0 <- which(colSums(df)==0)
+    removed0 <- colnames(df)[filter0]
+    df <- df[,-filter0] #remove if all zeros
+  }
+
+  ## remove columns with all identical values across the samples
+  nonIdentical_colnames <- df %>% dplyr::select(where(~n_distinct(.) > 1)) %>% colnames()
+  removedIdentical <- setdiff(colnames(df),nonIdentical_colnames)
+  df <- df %>% dplyr::select(where(~n_distinct(.) > 1))
+  
+  M <- cor(df, method = "spearman")
+  p.mat <- cor.mtest(df)$p
+
+  ## check if these are all not sig
+  p.mat.adj <- matrix(p.adjust(c(p.mat)), nrow=nrow(p.mat), byrow=FALSE)
+  colnames(p.mat.adj)=colnames(df)
+  rownames(p.mat.adj)=colnames(df)
+
+  col <- diverging_hcl(n=200, palette="Blue-Red")
+
+
+  cat(paste0("Number of samples in Corrplot: ",nrow(df)),"\n")
+  cat("\n")
+  cat(paste0("Number of Analytes in Corrplot: ",ncol(df)),"\n")
+  cat("\n")
+  cat(paste0("Analytes removed for NA: ", removedNA),"\n")
+  cat("\n")
+  cat(paste0("Analytes removed for zeros: ", removed0),"\n")
+  cat("\n")
+  cat(paste0("Analytes removed for all identical values: ", removedIdentical),"\n")
+  cat("\n")
+
+
+
+
+
+  p_val_levels <- c(0.05, 0.01)
+  p_val_names <- c("praw","padj")
+
+
+  # for(i in seq_along(p_val_levels)){
+  #   for(j in seq_along(p_val_names)){
+  
+  i <- 1
+  j <- 1
+      if(p_val_names[j] == "praw"){
+        p.mat_to_use <- p.mat
+      }else{
+        p.mat_to_use <- p.mat.adj
+      }
+
+corrplot(M, method = "ellipse", col = col,
+                     type = "upper", order = "hclust", number.cex = 0, #number.font=1,
+                     addCoef.col = NULL, # Add coefficient of correlation
+                     tl.col = "black", tl.srt = 90, tl.cex=1, cl.cex =1.2,# Text label color and rotation
+                     bg = "white", #background color
+                     title = paste0(p_val_names[j]," < ",p_val_levels[i]), mar=c(0,0,1,0),
+                     # Combine with significance
+                     p.mat = p.mat_to_use,
+                     sig.level = p_val_levels[i], insig = "blank",
+                     # hide correlation coefficient on the principal diagonal
+                     diag = FALSE)
+```
+
+```{r corrplotStats, include=FALSE}
+
+##### save the stats
+   list_of_stats[[paste0(contrast_name)]]  <- corrplot(M, method = "ellipse", col = col,
+                     type = "upper", order = "hclust", number.cex = 0, #number.font=1,
+                     addCoef.col = NULL, # Add coefficient of correlation
+                     tl.col = "black", tl.srt = 90, tl.cex=1.5, cl.cex =2,# Text label color and rotation
+                     bg = "white", #background color
+                     title = paste0(p_val_names[j]," < ",p_val_levels[i]), mar=c(0,0,1,0),
+                     # Combine with significance
+                     p.mat = p.mat_to_use,
+                     sig.level = p_val_levels[i], insig = "blank",
+                     # hide correlation coefficient on the principal diagonal
+                     diag = FALSE)$corrPos
+
+
+```
+
+
+## Supp Figure S1 {.tabset}
+
+### Fig S1A {.tabset}
+
+MSD for DNA/LION Vaccination V1, V2, V3, V4 x D1+4h, D2, D4, D8
+
+
+```{r prep_FigS1A}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only V1 D1, D1_1hr, D2
+  dplyr::filter(vaccine == "DNA_LION" &
+                  vax_dose %in% c("V1","V2","V3","V4") &
+                  Day %in% c("D1","D1_4h","D2","D4","D8")
+                  ) 
+
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_last(sampleName,"__"),
+                sampleName = NULL
+                ) 
+
+# id_var_of_interest <- "sampleName"
+# var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+# ## designate covariates with Day related first, then id
+# covariates=c("Day","MacaqueID")
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("V1_D1_4h","V1_D2","V1_D4","V1_D8",
+            "V2_D1_4h","V2_D2","V2_D4","V2_D8",
+            "V3_D1_4h","V3_D2","V3_D4","V3_D8",
+            "V4_D2","V4_D4","V4_D8"),
+  "time2"=c("V1_D1","V1_D1","V1_D1","V1_D1",
+            "V2_D1","V2_D1","V2_D1","V2_D1",
+            "V3_D1","V3_D1","V3_D1","V3_D1",
+            "V4_D1","V4_D1","V4_D1")
+)
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "FigS1A_MSD"
+```
+
+
+```{r differential_expression_FigS1A, ref.label=c('differential_expression')}
+```
+
+
+
+```{r FigS1A_Log2FCest_heatmaps_setup}
+### read in degs results
+degs_df <- list_of_stats[["FigS1A_MSD"]]
+
+
+degs_df_for_hm <- degs_df[,c("rowname",colnames(degs_df)[grepl("log2FC",colnames(degs_df))])] %>%
+  column_to_rownames() %>%
+  ### remove rows with all na
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  `colnames<-`(str_remove_all(str_remove_all(str_remove_all(str_remove_all(
+    str_remove_all(colnames(.),"D1_log2FC"),
+    "-V1_"),"-V2_"),"-V3_"),"-V4_")) %>%
+  ## sort
+  rownames_to_column() %>%
+  arrange(rowname) %>%
+  column_to_rownames()
+
+#### add in gap for missing
+degs_df_for_hm[,"V4_D1_4h"] <- NA
+
+
+timepoint_factor_order <- c("D1_4h","D2","D4","D8")
+
+
+############### annotation colors (set number of dirs)
+annotation_colors <-  list(Vaccine = c(V1="#038a7a",V2="#78038f",V3="goldenrod1",V4="#e615a0"),
+                           Day = c(D1_4h="grey20",D2="grey40",D4="grey60",D8="grey80"))
+
+
+
+######### annotation for columns
+annotation_col <- data.frame("contrast"= colnames(degs_df_for_hm)) %>% 
+ dplyr::mutate(
+   Day=factor(str_after_first(contrast,"_"),timepoint_factor_order),
+   Vaccine = factor(str_before_first(contrast,"_"),c("V1","V2","V3","V4"))) %>%
+  dplyr::arrange(Vaccine,Day) %>%
+  column_to_rownames("contrast")
+
+
+
+
+
+
+
+############## no row annotation
+gaps_col_to_use <- c(4,8,12)
+
+```
+
+```{r Log2FCest_heatmaps_prep_FigS1A, include = FALSE}
+mycols = diverging_hcl(n=100, palette="Blue-Red 3")
+scale_range = 2
+breakscale <- seq(-1*scale_range, scale_range, length=100)
+
+
+myMap <- pheatmap(degs_df_for_hm[,rownames(annotation_col)], scale="none", col = mycols,
+                breaks=breakscale, clustering_method="ward.D2",
+                gaps_col = gaps_col_to_use, 
+              border_color = NA,
+                #cluster_rows = FALSE, 
+              cluster_cols = FALSE,
+                annotation_col = annotation_col,show_colnames = FALSE,
+              #annotation_row = curr_ann_row,
+                annotation_colors = annotation_colors
+)
+
+
+
+######## spin the heatmap
+rowList1 <- data.frame("rowInd"=(myMap$tree_row$order), "hier"=seq(1, dim(degs_df_for_hm[,rownames(annotation_col)])[1], 1)) %>% arrange(rowInd) %>% cbind(rownames(degs_df_for_hm[,rownames(annotation_col)]))
+rowList_ordered <- rowList1 %>% arrange(hier)
+##Write these to a file 
+write.table(rowList_ordered,quote=F,sep="\t",row.names=F,file=file.path(outputTABLES_dir,paste0(contrast_name,"_rowlist_ordered_hm.txt"))) 
+## manually spin around the dendrogram to order the most up at the top
+## resave as (contrast_name,"_rowlist_ordered_hm_ForSpin.txt")
+
+```
+
+```{r Log2FCest_heatmapSPUN_FigS1A, results = 'asis', fig.height=7, fig.width=6}
+
+newOrder_row <- read.table(file.path(outputTABLES_dir,paste0(contrast_name,"_rowlist_ordered_hm_ForSpin.txt")), header=T)
+newOrder_row_v <-as.vector(newOrder_row[,3])
+
+  
+
+p <- pheatmap(degs_df_for_hm[,rownames(annotation_col)], scale="none", col = mycols,
+                breaks=breakscale, clustering_method="ward.D2",
+               cluster_rows=dendextend::rotate(myMap$tree_row, newOrder_row_v),
+                gaps_col = gaps_col_to_use, 
+              border_color = NA,
+                #cluster_rows = FALSE, 
+              cluster_cols = FALSE,
+                annotation_col = annotation_col,show_colnames = FALSE,
+              #annotation_row = curr_ann_row,
+                annotation_colors = annotation_colors
+)
+p
+
+
+  cat("\n")
+cat(' \n \n') ### this is the key!
+
+
+```
+
+### Fig S1B {.tabset}
+
+```{r prep_FigS1B}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only DNA_LION
+  ### all timepoints for each dose
+  dplyr::filter(vaccine == "DNA_LION" &
+                  vax_dose %in% c("V1","V2","V3","V4") 
+                  ) 
+
+
+
+
+
+df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  ### break out day & macaque ID
+  dplyr::mutate(vax_dose_day = factor(str_after_last(sampleName,"__"),
+                                  c("V1_D1","V1_D1_4h","V1_D2","V1_D4","V1_D8",
+                                    "V2_D1","V2_D1_4h","V2_D2","V2_D4","V2_D8",
+                                    "V3_D1","V3_D1_4h","V3_D2","V3_D4","V3_D8",
+                                    "V4_D1","V4_D2","V4_D3","V4_D4","V4_D8",
+                                    "V4_D15","V4_D22")),
+                ### to add spaces
+                vax_dose_day2 = ifelse(grepl("V1",vax_dose_day),as.numeric(vax_dose_day),
+                                       ifelse(grepl("V2",vax_dose_day),as.numeric(vax_dose_day)+1,
+                                              ifelse(grepl("V3",vax_dose_day),as.numeric(vax_dose_day)+2,
+                                              as.numeric(vax_dose_day)+3))),
+                MacaqueID = str_before_first(sampleName,"__"),
+                sampleName = NULL,
+                ### add cat for spacing between vax doses
+                ) 
+
+
+selected_analytes <- c("IL.15","CXCL10.IP.10",
+                       "IFN.g","CCL4.MIP.1b",
+                       "IL.1Ra","IL.6",
+                       "FLT3L","CXCL13",
+                       "CXCL11.ITAC","CCL2.MCP.1")
+
+### To name output files
+contrast_name <- "FigS1B_MSD"
+
+num_columns_for_plot <- 2
+```
+
+
+```{r lineTraces_with_meanOrmedian__FigS1B, results='asis',fig.height=12, fig.width=6}
+
+
+list_of_plots_mean <- list()
+list_of_plots_median <- list()
+## for each analyte of interest
+for(i in selected_analytes){
+ phen_to_plot <- df_long %>%
+    dplyr::filter(variable == i)
+  
+ 
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = vax_dose_day2, y = raw_value, group = MacaqueID)) + 
+    geom_line(color = "grey60")+
+    ## adds spaces in x axis
+    scale_x_continuous(breaks = unique(df_long$vax_dose_day2),
+                     #labels = str_replace(levels(phen_to_plot$vax_dose_day),"_","\n")
+                     labels = str_replace(levels(phen_to_plot$vax_dose_day),"_",", "))+
+    labs(title = i)+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_blank(), 
+            axis.title.x = element_blank(),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+  
+  p_mean <- p +
+    stat_summary(aes(group = 1, y = raw_value), fun=mean, geom="line", colour="red")
+  p_median <- p +
+    stat_summary(aes(group = 1, y = raw_value), fun=median, geom="line", colour="red")
+
+      # plot(p)
+  list_of_plots_mean[[i]] <- p_mean
+  list_of_plots_median[[i]] <- p_median  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+  cat("#### ",paste0("Mean"),"\n")
+  cat('\n')
+do.call("grid.arrange",c(list_of_plots_mean, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+    cat("#### ",paste0("Median"),"\n")
+  cat('\n')
+do.call("grid.arrange",c(list_of_plots_median, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+```
+
+
+
+### Fig S1C {.tabset}
+
+MSD for DNA/LION Vaccination V4 x D2, D4, D8, D15 & D22 vs D1
+
+
+```{r alluvial_UPdownChangers_FigS1C, results='asis', fig.width=24, fig.height=15}
+
+### stats are the same as for Fig3B_MSD_V4
+list_of_stats[["FigS1C_MSD_V4"]] <- list_of_stats[["Fig3B_MSD_V4"]]
+
+degs_df <- list_of_stats[["FigS1C_MSD_V4"]]
+
+
+degs_df_for_hm <- degs_df[,c("rowname",colnames(degs_df)[grepl("log2FC",colnames(degs_df))])] %>%
+  column_to_rownames() %>%
+  ### remove rows with all na
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  `colnames<-`(str_remove_all(str_remove_all(colnames(.),"-V4_D1_log2FC"),"V4_")) %>%
+  ## sort
+  rownames_to_column() %>%
+  arrange(rowname) %>%
+  column_to_rownames()
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("V4_D2","V4_D3","V4_D4","V4_D8","V4_D15","V4_D22"),
+  "time2"=c("V4_D1","V4_D1","V4_D1","V4_D1","V4_D1","V4_D1")
+)
+
+timepoint_factor_order <- c("D2","D3","D4","D8","D15","D22")
+
+
+
+############## use row annotation with sig categories as alluvial df
+
+### generate contrasts
+curr_contrasts <- c()
+for(npt in 1:nrow(TimePoints_to_compare)){
+  cont <- paste0(TimePoints_to_compare$time1[npt],"-",TimePoints_to_compare$time2[npt])
+  curr_contrasts <- c(curr_contrasts,cont)
+}
+
+annotation_row1 <- data.frame("rowname"=degs_df$rowname)
+for(curr_contrast in rev(curr_contrasts)){
+### trim to curr contrast
+  curr_pval_df <- degs_df[,c("rowname",colnames(degs_df)[grepl(curr_contrast,colnames(degs_df))])]
+  ### rename column names to be generic
+  orig_names <- colnames(curr_pval_df)
+  simp_names <- ifelse(grepl("_",orig_names),str_after_last(orig_names,"_"),orig_names)
+  colnames(curr_pval_df) <- simp_names
+  curr_pval_df <- curr_pval_df %>%
+    dplyr::mutate(dir = ifelse(pval < as.double(params$pCutoff),
+                               ifelse(log2FC > as.double(params$FCcutoff),"up", ifelse(log2FC > 0, "up_p_only",
+                                      ifelse(log2FC < (-1)*as.double(params$FCcutoff),"down",ifelse(log2FC < 0, "down_p_only","p_only")))),"not_sig"))
+  curr_df <- curr_pval_df[,c("rowname","dir")] %>%
+    dplyr::mutate(dir = factor(dir, c("up","up_p_only","not_sig","down_p_only","down")))
+  colnames(curr_df) <- c("rowname",paste0(str_remove_all(str_replace_all(curr_contrast,"-","vs"),"V4_"),"_dir"))
+  
+  annotation_row1 <- dplyr::left_join(annotation_row1,curr_df, by = "rowname")
+}
+
+#### make rownames
+annotation_row <- column_to_rownames(annotation_row1)
+
+
+######### make long dataframe to plot
+combo_df_long <- annotation_row %>%
+  ### remove rows with all NA
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  rownames_to_column("Gene") %>%
+  tidyr::pivot_longer(!Gene, names_to = "timepoint", values_to = "dir") %>%
+  dplyr::mutate(timepoint = factor(str_remove_all(timepoint,"_dir"),c("D2vsD1","D3vsD1","D4vsD1","D8vsD1","D15vsD1","D22vsD1")),
+                Gene = factor(Gene))
+
+
+ ###### set colors
+   color_df <- data.frame("group"=unique(levels(combo_df_long$dir)),
+                        "color"=c("red","lightpink","grey85","skyblue","blue"))
+ 
+  curr_color_df <- color_df[which(color_df$group %in% unique(combo_df_long$dir)),]
+
+ ####### plot
+      gg <- ggplot(combo_df_long,
+               aes(x = timepoint, stratum = dir, alluvium = Gene))+
+        stat_alluvium(aes(fill = dir), width = .65, alpha = 1/2,) +
+        stat_stratum(aes(stratum = dir, fill = dir), width = .65) +
+        stat_alluvium(geom = "text", aes(label = Gene), size = 6.3) +
+        scale_fill_manual(values = curr_color_df$color)+
+    theme_bw()+
+      theme(axis.text=element_text(size=20),legend.text=element_text(size=20),
+        axis.title=element_text(size=20,face="bold"))
+    #ggtitle(paste0(tissue_to_use))
+
+   plot(gg)
+
+   
+    cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+```
+
+
+## Supp Figure S2 {.tabset}
+
+### Fig S2B {.tabset}
+
+MSD for DNA/LION Vaccination & DNA Vaccination V1, V2 x D2, D4, D8
+
+
+```{r prep_FigS2B}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only V1 D1, D1_1hr, D2
+  dplyr::filter(vaccine %in% c("DNA_LION","DNA") &
+                  vax_dose %in% c("V1","V2") &
+                  Day %in% c("D1","D2","D4","D8")
+                  ) 
+
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+# id_var_of_interest <- "sampleName"
+# var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+# ## designate covariates with Day related first, then id
+# covariates=c("Day","MacaqueID")
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("DNA_LION__V1_D2","DNA_LION__V1_D4","DNA_LION__V1_D8",
+            "DNA_LION__V2_D2","DNA_LION__V2_D4","DNA_LION__V2_D8",
+            "DNA__V1_D2","DNA__V1_D4","DNA__V1_D8",
+            "DNA__V2_D2","DNA__V2_D4","DNA__V2_D8"),
+  "time2"=c("DNA_LION__V1_D1","DNA_LION__V1_D1","DNA_LION__V1_D1",
+            "DNA_LION__V2_D1","DNA_LION__V2_D1","DNA_LION__V2_D1",
+            "DNA__V1_D1","DNA__V1_D1","DNA__V1_D1",
+            "DNA__V2_D1","DNA__V2_D1","DNA__V2_D1")
+)
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "FigS2B_MSD"
+```
+
+
+```{r differential_expression_FigS2B, ref.label=c('differential_expression')}
+```
+
+
+
+```{r FigS2B_Log2FCest_heatmaps_setup}
+### read in degs results
+degs_df <- list_of_stats[["FigS2B_MSD"]]
+
+
+degs_df_for_hm <- degs_df[,c("rowname",colnames(degs_df)[grepl("log2FC",colnames(degs_df))])] %>%
+  column_to_rownames() %>%
+  ### remove rows with all na
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  `colnames<-`(
+    str_remove_all(
+      str_remove_all(
+      str_remove_all(
+    str_remove_all(colnames(.),"V1_D1_log2FC"),
+    "V2_D1_log2FC"),"-DNA_LION__"),"-DNA__")) %>%
+  ## sort
+  rownames_to_column() %>%
+  arrange(rowname) %>%
+  column_to_rownames()
+
+
+
+
+timepoint_factor_order <- c("D2","D4","D8")
+
+
+############### annotation colors (set number of dirs)
+annotation_colors <-  list(Vaccine = c(DNA_LION="darkgoldenrod",DNA="darkolivegreen"),
+                           Dose = c(V1="#038a7a",V2="#78038f"),
+                           Day = c(D2="grey40",D4="grey60",D8="grey80"))
+
+
+
+######### annotation for columns
+annotation_col <- data.frame("contrast"= colnames(degs_df_for_hm)) %>% 
+ dplyr::mutate(
+   Vaccine = factor(str_before_first(contrast,"__"),c("DNA_LION","DNA")),
+   Dose = factor(str_before_first(str_after_first(contrast,"__"),"_"),c("V1","V2")),
+   Day=factor(str_after_last(contrast,"_"),timepoint_factor_order)) %>%
+  dplyr::arrange(Vaccine,Dose,Day) %>%
+  column_to_rownames("contrast")
+
+
+
+############## no row annotation
+gaps_col_to_use <- c(3,6,9)
+
+```
+
+```{r Log2FCest_heatmaps_prep_FigS2B, ref.label=c('Log2FCest_heatmaps_prep_FigS1A'),include = FALSE}
+```
+
+```{r Log2FCest_heatmapSPUN_FigS2B, ref.label=c('Log2FCest_heatmapSPUN_FigS1A'), results = 'asis', fig.height=7, fig.width=6}
+```
+
+### Fig S2C {.tabset}
+
+```{r prep_FigS2C}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 0
+
+##### select data
+data_to_use <- list_of_datasets[["MSD"]] %>%
+  ### filter to only DNA_LION
+  ### only V1, V2; D1,D2,D4,D8
+  dplyr::filter(vaccine %in% c("DNA_LION","DNA") &
+                  vax_dose %in% c("V1","V2") &
+                  Day %in% c("D1","D2","D4","D8")
+                  ) 
+
+
+
+df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,vaccine,vax_dose,Day)) %>%
+  ### make longer 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  ### break out day & macaque ID
+  dplyr::mutate(vax_dose_day = factor(str_replace_all(str_after_first(sampleName,"__"),"DNA_LION","DNALION"),
+                                  c("DNALION__V1_D1","DNALION__V1_D2","DNALION__V1_D4","DNALION__V1_D8",
+                                    "DNALION__V2_D1","DNALION__V2_D2","DNALION__V2_D4","DNALION__V2_D8",
+                                    "DNA__V1_D1","DNA__V1_D2","DNA__V1_D4","DNA__V1_D8",
+                                    "DNA__V2_D1","DNA__V2_D2","DNA__V2_D4","DNA__V2_D8")),
+                ### to add spaces
+                vax_dose_day2 = ifelse(grepl("DNALION__V1",vax_dose_day),as.numeric(vax_dose_day),
+                                       ifelse(grepl("DNALION__V2",vax_dose_day),as.numeric(vax_dose_day)+1,
+                                              ifelse(grepl("DNA__V1",vax_dose_day),as.numeric(vax_dose_day)+2,
+                                              as.numeric(vax_dose_day)+3))),
+                MacaqueID = str_before_first(sampleName,"__"),
+                sampleName = NULL,
+                ### add cat for spacing between vax doses
+                ) 
+
+
+selected_analytes <- c("CX3CL1.Fractalkine","CXCL11.ITAC","IL.15","IL.7",
+                       "IL.1Ra","CXCL10.IP.10","CXCL13","CCL2.MCP.1",
+                       "FLT3L","IL.18")
+
+### To name output files
+contrast_name <- "FigS2C_MSD"
+
+num_columns_for_plot <- 4
+```
+
+
+```{r lineTraces_2groups__FigS2C, results='asis',fig.height=12, fig.width=12}
+
+list_of_plots <- list()
+
+## for each analyte of interest
+for(i in selected_analytes){
+ phen_to_plot <- df_long %>%
+    dplyr::filter(variable == i)
+  
+ 
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = vax_dose_day2, y = raw_value, group = MacaqueID)) + 
+    geom_line(color = "grey20")+
+    geom_point()+
+    ## adds spaces in x axis
+    scale_x_continuous(breaks = unique(df_long$vax_dose_day2),
+                     #labels = str_replace(levels(phen_to_plot$vax_dose_day),"_","\n")
+                     labels = str_replace(levels(phen_to_plot$vax_dose_day),"__",", "))+
+    labs(title = i)+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_blank(), 
+            axis.title.x = element_blank(),
+            axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+      # plot(p)
+  list_of_plots[[i]] <- p
+
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+
+ 
+```
+
+## Figure 4 {.tabset}
+
+### Fig 4C {.tabset}
+
+Broad cell populations vs Time
+
+```{r prep_Fig4C}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig4ABC"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+  
+
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("D3","D8","D22",
+            "D8","D22","D22"),
+  "time2"=c("D1","D1","D1",
+            "D3","D3","D8")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+timepoints_x_order <- c("D1","D3","D8","D22")
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig4C"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 3
+
+### order for scatterplots
+variables_ordered <- c("HLADRpos_Myeloid","B","T")
+```
+
+
+```{r differential_expression_Fig4C, ref.label=c('differential_expression')}
+```
+
+```{r scatterplots_with_pvalues, results='asis'}
+df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  ### break out compartment and variable
+  dplyr::mutate(comp_var = variable,
+                compartment = factor(str_before_first(variable,"__"),c("blood","LN")),
+                variable = factor(str_after_first(variable,"__"),variables_ordered),
+                Day = factor(str_after_first(sampleName,"__"),timepoints_x_order),
+                MacaqueID = str_before_first(sampleName,"__"),
+                sampleName = NULL) %>%
+  dplyr::arrange(compartment, variable)
+
+### set up p-values: rowname (comp_var), contrast, log2FC, pval, adjpval
+pval_df_trimmed <- list_of_stats[[paste0(contrast_name)]] %>%
+  ###make longer
+  tidyr::pivot_longer(cols=!rowname, names_to = "contrast_test", values_to = "value") %>%
+  dplyr::mutate(test = str_after_first(contrast_test,"_"),
+                contrast = str_before_first(contrast_test,"_"),
+                contrast_test = NULL) %>%
+  tidyr::pivot_wider(names_from = "test",values_from = "value") %>%
+  data.frame()
+
+### for each comp_var
+list_of_pvals <- list()
+for (i in unique(pval_df_trimmed$rowname)){
+  pval_df <- tibble::tribble(~group1, ~group2, ~p, ~est, ~dir)
+  for (g in 1:nrow(TimePoints_to_compare)){
+    
+    #### only if have the timepoints
+    if(dim(pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),])[1] > 0){
+        ### tribble
+    curr_df <- tibble::tribble(~group1, ~group2, ~p, ~est,
+                               TimePoints_to_compare[g,"time1"],TimePoints_to_compare[g,"time2"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"pval"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"log2FC"]
+                               ) %>%
+      ### add dir
+      dplyr::mutate(dir = ifelse(p < params$pCutoff, 
+                                   ifelse(est > 0, "up","down"),
+                                   "not_sig"),
+                    ### set sig figs
+                    p = signif(p,3)) 
+      
+      
+    
+    pval_df <- add_row(pval_df, curr_df)
+
+    }else{
+      pval_df <- pval_df
+    }
+     }
+  list_of_pvals[[paste0(i)]] <- pval_df
+}
+
+
+list_of_plots <- list()
+## for each comp var
+for(i in unique(df_long$comp_var)){
+ phen_to_plot <- df_long %>%
+    dplyr::filter(comp_var == i)
+  
+  # cat("##### ",paste0(i," "),"\n")
+  # cat("\n")
+  max_y <- max(phen_to_plot$raw_value, na.rm=TRUE)
+  min_y <- min(phen_to_plot$raw_value, na.rm=TRUE)
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(TimePoints_to_compare),
+                          length(which(list_of_pvals[[paste0(i)]][,"p"] < 0.05))
+  )
+  maxy_y_to_plot <- ifelse(plot_sig_only =="no",
+                                  max_y*(1+0.1*(num_contrasts+1)),
+                                  max_y*(1+0.1*(num_contrasts+1))
+                                         
+                                         )
+  
+  # color_df <- data.frame("variable"=levels(phen_to_plot$variable),
+  #                        
+  #                        "fill"=c("#929292","#008F00","#008EF1"))
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = Day, y = raw_value)) + 
+#        scale_color_manual(values=c(color_df$fill[which(color_df$variable == str_after_first(i,"__"))])) +  
+
+     geom_beeswarm(#aes(color=variable), 
+                   size = 2, shape=16, alpha=0.8, cex = 3)+
+  scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot)
+                     )+
+    labs(y = paste0(i))+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_text(size = 10), ### make smaller to fit
+            axis.title.x = element_blank())
+  
+  
+  
+  box_pval_cut <- 0.05
+  
+  ##### add p values
+  
+  ### if plotting all p
+if(plot_sig_only == "no"){
+
+  
+  for(l in 1:num_contrasts){
+     p <- p +
+        stat_pvalue_manual(list_of_pvals[[i]][l,], label = "p",size = 2.5,
+                           y.position = max_y+0.1*l*range_y, 
+                           bracket.size = 0.2, tip.length = 0)
+  }
+  
+}else{
+ 
+  # if there are any sig contrasts
+  if(num_contrasts > 0){
+     ## trim to sig contrasts
+        sig_pvals <- list_of_pvals[[i]][which(list_of_pvals[[i]][,"p"]  < 0.05),] %>%
+          ### add name
+        dplyr::left_join(TimePoints_to_compare, by =c("group1","group2"))
+        
+    for(l in 1:nrow(sig_pvals)){
+     # if(pval_combined[which(rownames(pval_combined) == i),paste0(sig_comp_pairs_df$name[l])] < as.double(box_pval_cut)){
+        p <- p +
+          stat_pvalue_manual(sig_pvals[l,], label = "p",size = 2.5,
+                             y.position = max_y+0.1*l*range_y, bracket.size = 0.2, tip.length = 0)
+                             
+    #  }else{
+    #    p <- p
+    #  }
+        }
+      
+      
+  }else{
+    p <- p
+  }   
+
+  
+}
+    
+ 
+  # plot(p)
+  list_of_plots[[i]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+```
+
+
+### Fig 4D {.tabset}
+
+B:T cell ratio in Blood vs LN
+
+```{r prep_Fig4D}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig4D"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+  
+
+
+ 
+### generate dataframe: rows = samples, columns = variables (including timepoint) and group for comparison (= compartment)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_before_first(variable,"__"), ### call timepoint the variable that you want to compare
+                variable = paste0(str_after_first(variable,"__"),"__",str_after_first(sampleName,"__")), ### add timepoint to variable
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("LN"),
+  "time2"=c("blood")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig4D"
+```
+
+
+```{r differential_expression_Fig4D, ref.label=c('differential_expression')}
+```
+
+```{r scatterplots_Fig4D_prep}
+df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  ### break out compartment and variable
+  dplyr::mutate(compartment = factor(str_before_first(variable,"__"),c("blood","LN")),
+                variable = str_after_first(variable,"__"),
+                Day = factor(str_after_first(sampleName,"__"),c("D1","D3","D8","D22")),
+                MacaqueID = str_before_first(sampleName,"__"),
+                var_tp = paste0(variable, "__", Day),
+                sampleName = NULL) %>%
+  dplyr::arrange(Day, variable)
+
+### set up p-values: rowname (comp_var), contrast, log2FC, pval, adjpval
+pval_df_trimmed <- list_of_stats[[paste0(contrast_name)]] %>%
+  ###make longer
+  tidyr::pivot_longer(cols=!rowname, names_to = "contrast_test", values_to = "value") %>%
+  dplyr::mutate(test = str_after_first(contrast_test,"_"),
+                contrast = str_before_first(contrast_test,"_"),
+                contrast_test = NULL) %>%
+  tidyr::pivot_wider(names_from = "test",values_from = "value") %>%
+  data.frame()
+
+### for each comp_var
+list_of_pvals <- list()
+for (i in unique(pval_df_trimmed$rowname)){
+  pval_df <- tibble::tribble(~group1, ~group2, ~p, ~est, ~dir)
+  for (g in 1:nrow(TimePoints_to_compare)){
+    
+    #### only if have the timepoints
+    if(dim(pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),])[1] > 0){
+        ### tribble
+    curr_df <- tibble::tribble(~group1, ~group2, ~p, ~est,
+                               TimePoints_to_compare[g,"time1"],TimePoints_to_compare[g,"time2"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"pval"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"log2FC"]
+                               ) %>%
+      ### add dir
+      dplyr::mutate(dir = ifelse(p < params$pCutoff, 
+                                   ifelse(est > 0, "up","down"),
+                                   "not_sig"),
+                    ### set sig figs
+                    p = signif(p,3)) 
+      
+      
+    
+    pval_df <- add_row(pval_df, curr_df)
+
+    }else{
+      pval_df <- pval_df
+    }
+     }
+  list_of_pvals[[paste0(i)]] <- pval_df
+}
+
+
+plot_sig_only <- "no"
+
+
+```
+
+```{r scatterplotsByComp_with_pvalues, results='asis', fig.height=4, fig.width=4}
+ phen_to_plot <- df_long 
+  # cat("##### ",paste0(i," "),"\n")
+  # cat("\n")
+  max_y <- max(phen_to_plot$raw_value, na.rm=TRUE)
+  min_y <- min(phen_to_plot$raw_value, na.rm=TRUE)
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(TimePoints_to_compare),
+                          length(which(list_of_pvals[[paste0(i)]][,"p"] < 0.05))
+  )
+  maxy_y_to_plot <- ifelse(plot_sig_only =="no",
+                                  max_y*(1+0.08*(num_contrasts+1)),
+                                  max_y*(1+0.08*(num_contrasts+1))
+                                         
+                                         )
+  
+  
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = Day, y = raw_value)) + 
+        scale_fill_manual(values=c("white","black")) +  
+
+     geom_beeswarm(aes(fill=compartment), color = "black", size = 2, shape=21, alpha=0.8, cex = 3, dodge.width = 0.7)+
+  scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot)
+                     )+
+    labs(y = paste0(i))+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_text(size = 10), ### make smaller to fit
+            axis.title.x = element_blank())
+  
+  
+  
+  box_pval_cut <- 0.05
+  
+  ##### add p values
+  
+  ### if plotting all p
+if(plot_sig_only == "no"){
+
+
+  
+  for(l in 1:length(list_of_pvals)){
+    currpvals <- list_of_pvals[[l]] %>% 
+    dplyr::mutate(x = as.numeric(l),
+                  xmin = x-0.2,
+                  xmax = x+0.2)
+    
+     p <- p +
+        stat_pvalue_manual(currpvals[1,], label = "p",size = 2.5,
+                           y.position = max_y+0.1*range_y, 
+                           bracket.size = 0.2, tip.length = 0)
+  }
+  
+}else{
+ 
+  # if there are any sig contrasts
+  if(num_contrasts > 0){
+     ## trim to sig contrasts
+        sig_pvals <- list_of_pvals[[i]][which(list_of_pvals[[i]][,"p"]  < 0.05),] %>%
+          ### add name
+        dplyr::left_join(TimePoints_to_compare, by =c("group1","group2"))
+        
+    for(l in 1:nrow(sig_pvals)){
+     # if(pval_combined[which(rownames(pval_combined) == i),paste0(sig_comp_pairs_df$name[l])] < as.double(box_pval_cut)){
+        p <- p +
+          stat_pvalue_manual(sig_pvals[l,], label = "p",size = 2.5,
+                             y.position = max_y+0.1*l*range_y, bracket.size = 0.2, tip.length = 0)
+                             
+    #  }else{
+    #    p <- p
+    #  }
+        }
+      
+      
+  }else{
+    p <- p
+  }   
+
+  
+}
+    
+ 
+  plot(p)
+ 
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+
+```
+
+
+
+### Fig 4E {.tabset}
+
+B-cell folicle IHC
+
+```{r prep_Fig4E}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig4E"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__"))))
+  
+##### controls are 3 different animals for GCtoNonGC only, not used for stats
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("D3","D8","D22",
+            "D8","D22","D22"),
+  "time2"=c("D1","D1","D1",
+            "D3","D3","D8")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+timepoints_x_order <- c("D1","D3","D8","D22")
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig4E"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 3
+
+### variables ordered in plots
+variables_ordered <- c("LN__BCF_GC","LN__BCF_noGC","LN__GCtoNonGC_ratio")
+```
+
+
+```{r differential_expression_Fig4E, ref.label=c('differential_expression')}
+```
+
+```{r scatterplots_with_pvalues___Fig4E, ref.label=c('scatterplots_with_pvalues'), results='asis', fig.height=5, fig.width=10}
+```
+
+
+## Supp Figure S3 {.tabset}
+
+CD4 and CD8 T cells
+
+```{r prep_FigS3}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "FigS3"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("D3","D8","D22",
+            "D8","D22","D22"),
+  "time2"=c("D1","D1","D1",
+            "D3","D3","D8")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+timepoints_x_order <- c("D1","D3","D8","D22")
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "FigS3"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 2
+
+### variables ordered in plots
+variables_ordered <- c("CD4","CD8")
+```
+
+```{r differential_expression_FigS3, ref.label=c('differential_expression')}
+```
+
+```{r scatterplots_with_pvalues___FigS3, ref.label=c('scatterplots_with_pvalues'), results='asis', fig.height=5, fig.width=5}
+```
+
+
+## Figure 5 {.tabset}
+
+Myeloid populations
+
+
+```{r prep_Fig5}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig5"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("D3","D8","D22",
+            "D8","D22","D22"),
+  "time2"=c("D1","D1","D1",
+            "D3","D3","D8")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig5ABC"
+#contrast_name <- "Fig5D_Myeloid_vsD1"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 3
+
+```
+
+```{r differential_expression_Fig5, ref.label=c('differential_expression')}
+```
+
+### Fig 5A
+
+```{r setVars_Fig5A}
+varcomp_to_plot <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos","LN__Pct_of_HLADRpos_HLA_DRpos_Ki67pos")
+```
+
+```{r Lineplots_with_pvalues, results='asis', fig.height=4, fig.width=6}
+df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  ### trim to only the vars in this panel
+  dplyr::filter(variable %in% varcomp_to_plot) %>%
+  ### break out compartment and variable
+  dplyr::mutate(comp_var = variable,
+                compartment = factor(str_before_first(variable,"__"),c("blood","LN")),
+                variable = factor(str_after_first(variable,"__"),varcomp_to_plot),
+                Day = factor(str_after_first(sampleName,"__"),c("D1","D3","D8","D22")),
+                MacaqueID = str_before_first(sampleName,"__"),
+                sampleName = NULL) %>%
+  dplyr::arrange(compartment, variable)
+
+### set up p-values: rowname (comp_var), contrast, log2FC, pval, adjpval
+pval_df_trimmed <- list_of_stats[[paste0(contrast_name)]] %>%
+  ###make longer
+  tidyr::pivot_longer(cols=!rowname, names_to = "contrast_test", values_to = "value") %>%
+  dplyr::mutate(test = str_after_first(contrast_test,"_"),
+                contrast = str_before_first(contrast_test,"_"),
+                contrast_test = NULL) %>%
+  tidyr::pivot_wider(names_from = "test",values_from = "value") %>%
+  data.frame()
+
+### for each comp_var
+list_of_pvals <- list()
+for (i in unique(pval_df_trimmed$rowname)){
+  pval_df <- tibble::tribble(~group1, ~group2, ~p, ~est, ~dir)
+  for (g in 1:nrow(TimePoints_to_compare)){
+    
+    #### only if have the timepoints
+    if(dim(pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),])[1] > 0){
+        ### tribble
+    curr_df <- tibble::tribble(~group1, ~group2, ~p, ~est,
+                               TimePoints_to_compare[g,"time1"],TimePoints_to_compare[g,"time2"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"pval"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"log2FC"]
+                               ) %>%
+      ### add dir
+      dplyr::mutate(dir = ifelse(p < params$pCutoff, 
+                                   ifelse(est > 0, "up","down"),
+                                   "not_sig"),
+                    ### set sig figs
+                    p = signif(p,3)) 
+      
+      
+    
+    pval_df <- add_row(pval_df, curr_df)
+
+    }else{
+      pval_df <- pval_df
+    }
+     }
+  list_of_pvals[[paste0(i)]] <- pval_df
+}
+
+
+list_of_plots <- list()
+## for each comp var
+for(i in unique(df_long$comp_var)){
+ phen_to_plot <- df_long %>%
+    dplyr::filter(comp_var == i)
+  
+  # cat("##### ",paste0(i," "),"\n")
+  # cat("\n")
+  max_y <- max(phen_to_plot$raw_value, na.rm=TRUE)
+  min_y <- min(phen_to_plot$raw_value, na.rm=TRUE)
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(TimePoints_to_compare),
+                          length(which(list_of_pvals[[paste0(i)]][,"p"] < 0.05))
+  )
+  maxy_y_to_plot <- ifelse(plot_sig_only =="no",
+                                  max_y*(1+0.1*(num_contrasts+1)),
+                                  max_y*(1+0.1*(num_contrasts+1))
+                                         
+                                         )
+  
+  # color_df <- data.frame("variable"=levels(phen_to_plot$variable),
+  #                        
+  #                        "fill"=c("#929292","#008F00","#008EF1"))
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = Day, y = raw_value)) + 
+#        scale_color_manual(values=c(color_df$fill[which(color_df$variable == str_after_first(i,"__"))])) +  
+
+     geom_point(#aes(color=variable), 
+                   size = 2, shape=16, alpha=0.8, cex = 3)+
+    geom_line(aes(group = MacaqueID), color = "grey30")+
+  scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot)
+                     )+
+    labs(y = paste0(i))+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_text(size = 10), ### make smaller to fit
+            axis.title.x = element_blank())
+  
+  
+  
+  box_pval_cut <- 0.05
+  
+  ##### add p values
+  
+  ### if plotting all p
+if(plot_sig_only == "no"){
+
+  
+  for(l in 1:num_contrasts){
+     p <- p +
+        stat_pvalue_manual(list_of_pvals[[i]][l,], label = "p",size = 2.5,
+                           y.position = max_y+0.1*l*range_y, 
+                           bracket.size = 0.2, tip.length = 0)
+  }
+  
+}else{
+ 
+  # if there are any sig contrasts
+  if(num_contrasts > 0){
+     ## trim to sig contrasts
+        sig_pvals <- list_of_pvals[[i]][which(list_of_pvals[[i]][,"p"]  < 0.05),] %>%
+          ### add name
+        dplyr::left_join(TimePoints_to_compare, by =c("group1","group2"))
+        
+    for(l in 1:nrow(sig_pvals)){
+     # if(pval_combined[which(rownames(pval_combined) == i),paste0(sig_comp_pairs_df$name[l])] < as.double(box_pval_cut)){
+        p <- p +
+          stat_pvalue_manual(sig_pvals[l,], label = "p",size = 2.5,
+                             y.position = max_y+0.1*l*range_y, bracket.size = 0.2, tip.length = 0)
+                             
+    #  }else{
+    #    p <- p
+    #  }
+        }
+      
+      
+  }else{
+    p <- p
+  }   
+
+  
+}
+    
+ 
+  # plot(p)
+  list_of_plots[[i]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+```
+
+
+### Fig 5B 
+
+```{r setVars_Fig5B}
+varcomp_to_plot <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos","LN__Pct_of_HLADRpos_HLA_DRpos_Ki67pos",
+                     "blood__Pct_of_HLADRpos_pDC_Ki67pos","LN__Pct_of_HLADRpos_pDC_Ki67pos",
+                     "blood__Pct_of_HLADRpos_cDC_Ki67pos","LN__Pct_of_HLADRpos_cDC_Ki67pos",
+                     "blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos","LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos")
+```
+
+
+```{r Log2FCest_heatmaps_setup_CellPops}
+### read in degs results
+degs_df <- list_of_stats[[paste0(contrast_name)]] %>%
+  #### trim to only the vars in the figure panel
+  dplyr::filter(rowname %in% varcomp_to_plot)
+
+
+#### for hm only want the vs D1
+degs_df_for_hm <- degs_df[,c("rowname",colnames(degs_df)[grepl("D1_log2FC",colnames(degs_df))])] %>%
+  column_to_rownames() %>%
+  ### remove rows with all na
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  `colnames<-`(str_remove_all(colnames(.),"-D1_log2FC")) %>%
+  ## sort
+  rownames_to_column() %>%
+  arrange(rowname) %>%
+  column_to_rownames()
+
+
+timepoint_factor_order <- c("D3","D8","D22")
+
+
+############### annotation colors (set number of dirs)
+annotation_colors <-  list(Day = c(D3="grey40",D8="grey80",D22="grey90"),
+                           dir1 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir2 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir3 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir4 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir5 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue"),
+                           dir6 = c(up="red",up_p_only="lightpink",not_sig="grey95",down_p_only="skyblue",down="blue")
+                           )
+
+names(annotation_colors[["Day"]]) <- timepoint_factor_order
+names(annotation_colors) <- c("Day",paste0(str_replace_all(TimePoints_to_compare$name,"-","vs"),"_dir"))
+
+
+######### annotation for columns
+annotation_col <- data.frame("contrast"= colnames(degs_df_for_hm)) %>%
+  mutate(Day=factor(contrast, timepoint_factor_order)) %>%
+  arrange(Day) %>%
+  column_to_rownames("contrast")
+
+
+
+############## add row annotation with sig change for FC
+
+### generate contrasts
+curr_contrasts <- c()
+for(npt in 1:nrow(TimePoints_to_compare)){
+  cont <- paste0(TimePoints_to_compare$time1[npt],"-",TimePoints_to_compare$time2[npt])
+  curr_contrasts <- c(curr_contrasts,cont)
+}
+
+annotation_row1 <- data.frame("rowname"=degs_df$rowname)
+for(curr_contrast in rev(curr_contrasts)){
+### trim to curr contrast
+  curr_pval_df <- degs_df[,c("rowname",colnames(degs_df)[grepl(curr_contrast,colnames(degs_df))])]
+  ### rename column names to be generic
+  orig_names <- colnames(curr_pval_df)
+  simp_names <- ifelse(grepl("_",orig_names),str_after_last(orig_names,"_"),orig_names)
+  colnames(curr_pval_df) <- simp_names
+  curr_pval_df <- curr_pval_df %>%
+    dplyr::mutate(dir = ifelse(pval < as.double(params$pCutoff),
+                               ifelse(log2FC > as.double(params$FCcutoff),"up", ifelse(log2FC > 0, "up_p_only",
+                                      ifelse(log2FC < (-1)*as.double(params$FCcutoff),"down",ifelse(log2FC < 0, "down_p_only","p_only")))),"not_sig"))
+  curr_df <- curr_pval_df[,c("rowname","dir")] %>%
+    dplyr::mutate(dir = factor(dir, c("up","up_p_only","not_sig","down_p_only","down")))
+  colnames(curr_df) <- c("rowname",paste0(str_remove_all(str_replace_all(curr_contrast,"-","vs"),"V4_"),"_dir"))
+  
+  annotation_row1 <- dplyr::left_join(annotation_row1,curr_df, by = "rowname")
+}
+
+#### make rownames
+annotation_row <- column_to_rownames(annotation_row1)
+### sort to specified order
+curr_ann_row <- annotation_row[varcomp_to_plot,]
+
+
+```
+
+
+```{r Log2FCest_heatmaps_Fig5B, ref.label=c('Log2FCest_heatmaps'), results = 'asis', fig.height=4, fig.width=8}
+```
+
+### Fig 5C {.tabset}
+
+```{r setVars_Fig5C}
+varcomp_to_plot <- c("blood__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos","LN__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
+                     "blood__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos","LN__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                     "blood__Pct_of_HLADRpos_DC3_Ki67pos","LN__Pct_of_HLADRpos_DC3_Ki67pos",
+                     "blood__Pct_of_HLADRpos_cDC1_Ki67pos","LN__Pct_of_HLADRpos_cDC1_Ki67pos",
+                     "blood__Pct_of_HLADRpos_cDC2_Ki67pos","LN__Pct_of_HLADRpos_cDC2_Ki67pos")
+
+num_columns_for_plot <- 5
+```
+
+#### lineplot
+```{r Lineplots_with_pvalues_Fig5C, ref.label=c('Lineplots_with_pvalues'), results='asis', fig.height=8, fig.width=10}
+```
+
+#### heatmap
+```{r Log2FCest_heatmaps_setup_CellPops_Fig5C, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
+```
+
+```{r Log2FCest_heatmaps_Fig5C, ref.label=c('Log2FCest_heatmaps'), results = 'asis', fig.height=7, fig.width=10}
+```
+
+### Fig 5D {.tabset}
+
+Spearman correlation between MSD D2vsD1 and Myeloid populations
+
+```{r prepForDiffCounts_CellPops}
+
+########## generate "dataset" format - wide, no metadata with columns = samples (including vax, timepoint, animal), rows = analytes
+##### has analyte names as rownames AND as column labeled gene
+df <- data_to_use %>%
+  ### remove metadata
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2
+  tidyr::pivot_longer(cols=!sampleName, names_to = "analyte", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL) %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "sampleName", values_from = "log2_value") %>%
+  dplyr::mutate(Gene=analyte) %>%
+  column_to_rownames("analyte") %>%
+  relocate(Gene)
+
+
+analyte_columns <- rownames(df)
+
+
+## generate metadata only
+targetfile_full <- data_to_use %>%
+  ### remove data columns
+  dplyr::select(-all_of(analyte_columns))
+
+id_var_of_interest <- "sampleName"
+var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+## designate covariates with Day related first, then id
+covariates=c("Day","MacaqueID")
+
+contrasts <- c("D3-D1","D8-D1","D22-D1")
+
+contrast_name <- "Fig5DE_Myeloid"
+
+raw_or_adj <- "raw"
+```
+
+```{r diff_counts_calcs__Fig5D, ref.label=c('diff_counts_calcs'), include = FALSE}
+```
+
+```{r spearmanCorrVsMSD}
+
+### which dataset levels/FC, trimmed to the tab
+curr_ds <- list_of_diff_counts[[paste0(contrast_name)]] %>%
+  column_to_rownames("Gene")
+
+###### MSD = D2-D1 only log2FC
+curr_df2 <- data.frame(t(list_of_diff_counts[[paste0("Fig3C_MSD_V4_D2vsD1")]])) %>%
+  ### make row 1 colnames
+  janitor::row_to_names(row_number = 1) %>%
+  ### trim to only D2-D1
+  rownames_to_column("sampleName") %>%
+  dplyr::filter(grepl("D2-D1",sampleName)) %>%
+  ### be sure sorted
+  dplyr::arrange(sampleName) %>%
+  column_to_rownames("sampleName") %>%
+  #### then remove columns with all NA
+  select_if(~ !all(is.na(.))) %>%
+  ### be sure numeric
+  mutate_if(is.character, as.numeric)
+  
+
+set_names_to_use <- c(paste0(c("D3-D1","D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC"))
+
+corr_tag_name <- "CorrVsMSD"
+
+ ######## calculate correlation
+  cor_method <- "spearman"
+  
+  CorrName <- paste0(contrast_name,"__",corr_tag_name)
+    
+  #### generate empty dataframe for combo
+fullcombo_df_long <- data.frame()
+
+
+  for(set_name in set_names_to_use){
+   curr_df1 <- data.frame(t(curr_ds)) %>%
+    
+    ### trim to only tp of interest
+    rownames_to_column("sampleName") %>%
+    dplyr::filter(grepl(str_before_first(set_name,"_"),sampleName)) %>%
+    ### be sure sorted
+    dplyr::arrange(sampleName) %>%
+    column_to_rownames("sampleName") %>%
+    #### then remove columns with all NA
+    select_if(~ !all(is.na(.))) %>%
+    ## remove rows with all NAs
+    filter(if_any(everything(), ~ !is.na(.))) %>%
+    ### be sure numeric
+    mutate_if(is.character, as.numeric)
+  
+
+    ## generate cor matrix 
+  cor_mat <- cor(as.matrix(signif(curr_df1,7)), as.matrix(signif(curr_df2,7)), method = cor_method, use="pa")
+ 
+  ## raw p
+  cor_test_mat <- data.frame(matrix(NA, nrow=dim(curr_df1)[2], ncol=dim(curr_df2)[2]))
+  rownames(cor_test_mat) <- colnames(curr_df1)
+  colnames(cor_test_mat) <- colnames(curr_df2)
+  
+  for(curr1 in colnames(curr_df1)) {
+    for(curr2 in colnames(curr_df2)) {
+      cor_test_mat[curr1, curr2] <- 
+        cor.test(as.matrix(signif(curr_df1,7)[,curr1]), 
+                 as.matrix(signif(curr_df2,7)[,curr2]), 
+                 method = cor_method, use="pa")$p.value
+    }
+  }
+  
+ ## adj p for multiple comparisons by BH over cytokine assays
+  cor_test_adj_mat <- cor_test_mat #duplicate dataframe to replace values
+  for(curr_assay in colnames(curr_df1)) {
+    cor_test_adj_mat[curr_assay,] <- p.adjust(cor_test_mat[curr_assay,], method = "BH")
+  }
+
+
+  
+    ### write function for converting the cor_mat to long format df
+    corr_to_long <- function(mat){
+      data.frame(mat) %>%
+        rownames_to_column("celltype") %>%
+        tidyr::pivot_longer(!celltype, names_to = "assay", values_to = "value") %>%
+        dplyr::mutate(celltype_assay = paste0(celltype,"_vs_",assay))
+      
+    }
+
+    
+    
+    
+    
+    #### convert to long
+    cor_long <-  corr_to_long(cor_mat)   
+    if(raw_or_adj == "raw"){
+      p_long <-  corr_to_long(cor_test_mat)     
+    }else{
+      p_long <-  corr_to_long(cor_test_adj_mat)     
+    }
+    
+    #### combine cor and p long dfs
+    curr_df_long <- dplyr::left_join(cor_long,p_long, by = c("celltype","assay","celltype_assay")) %>%
+      ### rename values to be useful
+      dplyr::rename(corr_coef=value.x,p=value.y) %>%
+      ### add column with set_name
+      dplyr::mutate(timepoint = paste0(str_replace_all(set_name,"-","vs")))
+
+  
+  ### add to fullcombo
+  fullcombo_df_long <- rbind(fullcombo_df_long,curr_df_long)
+  
+  }
+
+### add to stats master list
+list_of_stats[[paste0(CorrName)]] <- fullcombo_df_long %>% 
+  dplyr::relocate(celltype, assay, corr_coef, p, timepoint)
+
+```
+
+#### blood
+
+```{r Fig5D__vsMSD_BloodposOnlySELECTEDmsd_setup}
+
+barbara_order <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos",
+                   "blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos",
+                   "blood__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
+                   "blood__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                   "blood__Pct_of_HLADRpos_DC3_Ki67pos"
+                   )
+ 
+
+## only for the Intervals
+timepoints_to_use <- paste0(c("D3-D1","D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC")
+TP_name <- "Intervals"
+
+corr_tag_name <- "CorrVsMSD" 
+raw_or_adj <- "raw"
+cor_method <- "spearman"
+trim_pval_level <- 0.05
+all_or_selected <- "selected"
+assay_arrangement <- c("CCL19.MIP.3b","CCL24.Eotaxin.2","CCL26.Eotaxin.3","CCL27.CTACK","CXCL13",
+                       "FLT3L","CCL13.MCP.4","CXCL12.SDF.1a","CCL11.Eotaxin","CCL22.MDC",
+                       
+                       #"IL.17B",
+                       "IL.9") ### if trimming/ordering assays
+
+
+### set pos/neg/both
+directions_to_use <- c("pos")
+assays_to_exclude <- c("")
+```
+
+`r paste0(raw_or_adj," p < ",trim_pval_level)`
+
+```{r combinedBubblePlot, fig.height=6, fig.width=6}
+
+#### make df for plotting 
+df_long1 <- fullcombo_df_long %>%
+  ### generate dir column
+  dplyr::mutate(dir = ifelse(p < trim_pval_level,
+                             ifelse(corr_coef > 0, "pos","neg"),
+                             "notSig"),
+                ### break out compartment
+                compartment = str_before_first(celltype,"__"),
+                celltype = str_after_first(celltype,"__"),
+                celltype_assay = str_after_first(celltype_assay,"__")) %>%
+  ### remove the corr and p vals for pivoting
+  dplyr::select(-c(corr_coef,p)) 
+
+
+
+###### set up inital dataframe
+## trim to only sig
+bub_df2 <- df_long1[which(df_long1$dir %in% directions_to_use ),] %>%
+  ### also remove any analytes_to_exclude
+  dplyr::filter(!assay %in% assays_to_exclude) %>%
+  dplyr::mutate(timepoint = factor(str_before_first(timepoint,"_"),str_replace_all(str_before_first(timepoints_to_use,"_"),"-","vs")),
+                dir = factor(dir, directions_to_use),
+                ##### add compartment to celltype
+                comp_celltype = paste0(compartment,"__",celltype)) 
+
+
+#### remove timepoint suffix from celltype (only needed for vs Abs/NAbs)
+cleaned_celltypes <- bub_df2$comp_celltype
+for(tu in timepoints_to_use){
+  cleaned_celltypes <- str_remove_all(cleaned_celltypes,paste0("__",str_replace_all(tu,"-","vs")))
+}
+
+bub_df2$celltype <- cleaned_celltypes
+
+
+
+
+  #### if selected tab combos, keep cell pops on the x-axis
+
+      
+         bub_df_bothordered <- bub_df2 %>%
+           #### trim to desired assays
+           dplyr::filter(assay %in% assay_arrangement) %>%
+      ### remove factor levels for assay
+      dplyr::mutate(assay = factor(as.character(assay),assay_arrangement),
+                    ### also breakout for celltype
+                    celltype_only = str_after_first(celltype,"__"),
+                    compartment = factor(compartment, c("blood","LN"))) %>%   
+      dplyr::arrange(assay) %>%
+      #### trim to barbara_order celltypes
+      dplyr::filter(celltype %in% barbara_order) %>%
+      ## lock in factor levels for assay (rev for y axis since want it to be reversed)
+      dplyr::mutate(assay = factor(assay, rev(unique(assay))),
+                    ### now get celltype order
+                    celltype = factor(celltype, intersect(barbara_order,unique(celltype)))) %>%
+           #### now arrange by timepoint to be able to see bulls eyes
+           dplyr::arrange(desc(timepoint))
+    
+ 
+      ###### reversed axes!!!
+    bba <- 
+      ggplot(bub_df_bothordered, aes(x = celltype, y = assay))+
+      geom_point(aes(size = timepoint, color = timepoint))+
+      #scale_alpha_manual(values = alpha_values)+
+      scale_size_manual(values = c(3,6,10))+
+      scale_color_manual(values = c("#262626","#7F7F7F","#BFBFBF"))+
+      theme_bw()+
+      ### make legend symbol bigger & fix color 
+      # guides(color = guide_legend(override.aes = list(size = 5)),
+      #        size = guide_legend(override.aes = list(color = leg_color)))+
+      ## remove gridlines
+      theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            ## rotate axis labels
+            axis.text.x = element_text(angle = 45, vjust = 1, hjust=1))
+  
+  
+    plot(bba)
+    
+
+        
+  cat("\n")
+    cat(' \n \n') ### this is the key!
+      ### last plot in loop doesn't appear unless add this
+  
+    
+ 
+ 
+  cat("\n")
+    cat(' \n \n') ### this is the key!
+    ###### need to fix why this plots in Rstudio but not renedered
+
+```
+
+#### LN
+
+```{r Fig5D__vsMSD_LNposOnlySELECTEDmsd_setup}
+
+barbara_order <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos",
+                   "blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos",
+                   "blood__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
+                   "blood__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                   "blood__Pct_of_HLADRpos_DC3_Ki67pos"
+                   )
+ 
+
+## only for the Intervals
+timepoints_to_use <- paste0(c("D3-D1","D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC")
+TP_name <- "Intervals"
+
+corr_tag_name <- "CorrVsMSD" 
+raw_or_adj <- "raw"
+cor_method <- "spearman"
+trim_pval_level <- 0.05
+all_or_selected <- "selected"
+assay_arrangement <- c("CCL19.MIP.3b","CCL24.Eotaxin.2","CCL26.Eotaxin.3","CCL27.CTACK","CXCL13",
+                       "FLT3L","CCL13.MCP.4","CXCL12.SDF.1a","CCL11.Eotaxin","CCL22.MDC",
+                       
+                       #"IL.17B",
+                       "IL.9") ### if trimming/ordering assays
+
+
+### set pos/neg/both
+directions_to_use <- c("pos")
+assays_to_exclude <- c("")
+```
+
+`r paste0(raw_or_adj," p < ",trim_pval_level)`
+
+```{r combinedBubblePlot__Fig5D_LN, ref.label=c('combinedBubblePlot'), results='asis', fig.height=6, fig.width=6}
+```
+
+### Fig 5E
+
+Selected scatterplots
+
+```{r corrScatterPlots_prep_Fig5E}
+selected_pairs_df <- data.frame("var_x"=c("blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos",
+                                          "blood__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                                          "blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos",
+                                          "blood__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                                          "LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos",
+                                          "LN__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
+                                          "LN__Pct_of_HLADRpos_DC3_Ki67pos",
+                                          "LN__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos"),
+                                "Day_x"=c("D3-D1",
+                                             "D8-D1",
+                                             "D8-D1",
+                                             "D8-D1",
+                                             "D8-D1",
+                                             "D3-D1",
+                                             "D8-D1",
+                                             "D3-D1"
+                                             ),
+                                "var_y"=c("IL.9",
+                                          "FLT3L",
+                                          "CCL27.CTACK",
+                                          "CXCL12.SDF.1a",
+                                          "G.CSF",
+                                          "CXCL12.SDF.1a",
+                                          "FLT3L",
+                                          "CCL13.MCP.4"),
+                                "Day_y"=c(rep("D2-D1",8))
+)
+
+num_columns_for_plot <- 2
+```
+
+```{r corrScatterplots_with_RandPvalues, results='asis', fig.height=10}
+### pivot curr_ds to separate timepoint from animal
+df_long <- curr_ds %>%
+  rownames_to_column("comp_var") %>%
+  tidyr::pivot_longer(!comp_var, names_to = "sampleName", values_to = "log2FC") %>%
+  ### break out MacaqueID and Day
+  dplyr::mutate(Day = str_after_first(sampleName,"__"),
+                Day = str_replace_all(Day,"-","vs"),
+                MacaqueID = str_before_first(sampleName,"__"),
+                sampleName = NULL) %>%
+  ### add in the second df
+  dplyr::full_join(data.frame(t(curr_df2)) %>%
+                     rownames_to_column("comp_var") %>%
+                     tidyr::pivot_longer(!comp_var, 
+                                         names_to = "sampleName", values_to = "log2FC") %>%
+                     ### break out MacaqueID and Day
+                     dplyr::mutate(Day = str_after_first(sampleName,"__"),
+                                   Day = str_replace_all(Day,"\\.","vs"),
+                                   Day = str_replace_all(Day,"-","vs"),
+                                   MacaqueID = str_before_first(sampleName,"__"),
+                                   sampleName = NULL),
+                   by = c("comp_var","Day","MacaqueID","log2FC")
+  )
+
+
+
+list_of_plots <- list()
+## for each selected pair
+for(i in 1:nrow(selected_pairs_df)){
+  curr_x <- selected_pairs_df$var_x[i]
+  curr_Day_x <- str_replace_all(selected_pairs_df$Day_x[i],"-","vs")
+  curr_y <- selected_pairs_df$var_y[i]
+  curr_Day_y <- str_replace_all(selected_pairs_df$Day_y[i],"-","vs")
+  
+ phen_to_plot <- df_long %>%
+    dplyr::filter(comp_var %in% c(curr_x,curr_y)) %>%
+   dplyr::filter(Day %in% c(curr_Day_x,curr_Day_y)) %>%
+   ### combine var and time
+   dplyr::mutate(comp_var_day = paste0(comp_var,"___",Day),
+                 comp_var = NULL, Day = NULL) %>%
+   tidyr::pivot_wider(names_from = comp_var_day, values_from = log2FC)
+  
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = !!rlang::sym(paste0(curr_x,"___",curr_Day_x)), 
+                                y = !!rlang::sym(paste0(curr_y,"___",curr_Day_y)))) + 
+    geom_point()+
+    stat_cor(method = "spearman")+
+    xlab(paste0(curr_x,"\n",curr_Day_x))+
+    ylab(paste0(curr_y,"\n",curr_Day_y))+
+           
+    theme_bw()+
+    theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title = element_text(size = 10)) ### make smaller to fit
+  # plot(p)
+  list_of_plots[[i]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+```
+
+## Supp Figure S4 {.tabset}
+
+### Fig S4A
+
+
+```{r setVars_FigS4A}
+varcomp_to_plot <- c("blood__Pct_of_HLADRpos_pDC_Ki67pos","LN__Pct_of_HLADRpos_pDC_Ki67pos",
+                     "blood__Pct_of_HLADRpos_cDC_Ki67pos","LN__Pct_of_HLADRpos_cDC_Ki67pos",
+                     "blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos","LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos")
+
+#### need to reload Fig5 prep
+list_of_stats[["FigS4A"]] <- data.frame("FigS4A"="stats are in the Fig5ABC tab")
+```
+
+```{r prep_FigS4A, ref.label=c('prep_Fig5')}
+```
+
+```{r Lineplots_with_pvalues_FigS4A, ref.label=c('Lineplots_with_pvalues'), eval=TRUE, results='asis', fig.height=6, fig.width=8}
+```
+
+
+### FigS4B {.tabset}
+
+```{r prep_FigS4B}
+########## uses data from Figure 5
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig5"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+
+
+
+curr_phen_long  <- data_to_use %>%
+  # calculate additional populations for generating proportions of 100%
+  dplyr::mutate(LN__Pct_of_HLADRpos_cDC_wo_cDC1orcDC2_Ki67pos = LN__Pct_of_HLADRpos_cDC_Ki67pos -
+                  (LN__Pct_of_HLADRpos_cDC1_Ki67pos + LN__Pct_of_HLADRpos_cDC2_Ki67pos),
+                LN__Pct_of_HLADRpos_cDC_Ki67pos = NULL,
+                LN__Pct_of_HLADRpos_Classical_Mo_minusDC3_Ki67pos = LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos - LN__Pct_of_HLADRpos_DC3_Ki67pos,
+                LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos = NULL,
+                LN__Pct_of_HLADRpos_HLA_DRpos_Ki67pos = NULL,
+                
+                blood__Pct_of_HLADRpos_cDC_wo_cDC1orcDC2_Ki67pos = blood__Pct_of_HLADRpos_cDC_Ki67pos -
+                  (blood__Pct_of_HLADRpos_cDC1_Ki67pos + blood__Pct_of_HLADRpos_cDC2_Ki67pos),
+                blood__Pct_of_HLADRpos_cDC_Ki67pos = NULL,
+                blood__Pct_of_HLADRpos_Classical_Mo_minusDC3_Ki67pos = blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos - blood__Pct_of_HLADRpos_DC3_Ki67pos,
+                blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos = NULL,
+                blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos = NULL) %>%
+  ### get average for each day/compartment
+  # first make longer
+  dplyr::select(-sampleName) %>%
+  tidyr::pivot_longer(cols = contains("__"), names_to = "comp_var", values_to = "value") %>%
+  dplyr::mutate(compartment = factor(str_before_first(comp_var,"__"), c("blood","LN")),
+                variable = str_after_last(comp_var,"__"),
+                Day = factor(Day, c("D1","D3","D8","D22"))) %>%
+
+  
+  
+  ### collect proportion of 100% and means
+  # collect total
+  group_by(compartment, Day, MacaqueID) %>%
+  dplyr::mutate(total_per_comp_time = sum(value)) %>%
+  ungroup() %>%
+  # calculate prop within each animal
+  group_by(compartment, variable, Day, MacaqueID) %>%
+  dplyr::mutate(prop = value / total_per_comp_time *100) %>%  
+  ungroup() %>%
+  # take mean across animals
+  group_by(compartment, variable, Day) %>%
+  dplyr::summarise(mean = mean(prop)) %>%
+  # add comp_time
+  dplyr::mutate(comp_time = paste0(compartment,"__",Day),
+                variable = factor(variable, c("Pct_of_HLADRpos_pDC_Ki67pos",
+                                              "Pct_of_HLADRpos_cDC1_Ki67pos",
+                                              "Pct_of_HLADRpos_cDC2_Ki67pos",
+                                              "Pct_of_HLADRpos_cDC_wo_cDC1orcDC2_Ki67pos",
+                                              "Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                                              "Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
+                                              "Pct_of_HLADRpos_Classical_Mo_minusDC3_Ki67pos",
+                                              "Pct_of_HLADRpos_DC3_Ki67pos"))) %>%
+  # sort
+  ungroup() %>%
+  dplyr::arrange(compartment,Day,variable) 
+ 
+  
+  
+
+### To name output files
+contrast_name <- "FigS4B_mean_of_props"
+
+list_of_stats[[paste0(contrast_name)]] <- curr_phen_long %>%
+  dplyr::select(-comp_time)
+
+num_columns_for_plot <- 4
+```
+
+```{r FigS4B_pies, fig.width=18, fig.height=14}
+list_of_plots <- list()
+#collect phen_to_plots
+phen_to_plots <- data.frame()
+
+## for each comp_time
+for(i in unique(curr_phen_long$comp_time)){
+ phen_to_plot <- curr_phen_long %>%
+    dplyr::filter(comp_time == i) %>%
+    ## add in labels
+    dplyr::arrange(compartment,variable) %>%
+    dplyr::mutate(label = paste0(signif(mean,2),"%"),
+                  ### add positions https://wilkelab.org/practicalgg/articles/bundestag_pie.html
+                  cumsum_mean = cumsum(mean),
+                  sum_mean = sum(mean),
+                  end_angle = 2*pi*cumsum(mean)/sum(mean),   # ending angle for each pie slice
+    start_angle = lag(end_angle, default = 0),   # starting angle for each pie slice
+    mid_angle = 0.5*(start_angle + end_angle),   # middle of each pie slice, for the text label
+    # horizontal and vertical justifications depend on whether we're to the left/right
+    # or top/bottom of the pie
+    hjust = ifelse(mid_angle > pi, 1, 0),
+    vjust = ifelse(mid_angle < pi/2 | mid_angle > 3*pi/2, 0, 1),
+                  ## add in positions for polar coord https://r-charts.com/part-whole/pie-chart-labels-outside-ggplot2/
+                  # csum = rev(cumsum(rev(mean))), 
+                  # pos = mean/2 + lead(csum, 1),
+                  # pos = if_else(is.na(pos), mean/2, pos),
+                  ### add explosion
+                  focus = ifelse(mean < 10, 0.04, 0)) %>%
+    ## remove rows with mean = 0
+    dplyr::filter(mean != 0) 
+ 
+ if(dim(phen_to_plots)[1] == 0){
+   phen_to_plots <- phen_to_plot
+ }else{
+   phen_to_plots <- rbind(phen_to_plots,phen_to_plot)
+ }
+  
+ ### set colors
+  color_df <- data.frame("variable"=unique(curr_phen_long$variable),
+
+                         "fill"=c("#D6D6D6","#0533FF","#D783FF","#73FCD6",
+                                  "#FFFC79","#038F01","#FF7E79","#FF2501"),
+                         "color"=c("grey50","#0533FF","#D783FF","#59A38E",
+                                  "lightgoldenrod3","#038F01","#FF7E79","#FF2501"))
+  
+
+  #### base plot
+  p1 <- phen_to_plot %>%
+    ## plot
+    ggplot() + 
+    scale_fill_manual(values=c(color_df$fill[which(color_df$variable %in% unique(phen_to_plot$variable))])) + 
+    scale_color_manual(values=c(color_df$color[which(color_df$variable %in% unique(phen_to_plot$variable))])) +
+    ggforce::geom_arc_bar(
+                 aes(x0 = 0, y0 = 0, r0 = 0, r = 0.7, amount = mean,
+     fill = variable, explode = focus),
+     data=phen_to_plot, stat = 'pie', size = 0.1)+
+    
+    geom_text(
+    aes(
+      x = (.75+focus) * sin(mid_angle),
+      y = (.75+focus) * cos(mid_angle),
+      label = label, color = variable,
+      hjust = hjust, vjust = vjust
+    ),
+    size = 10/.pt,
+    show.legend = FALSE ## no a in the legend
+  ) +
+    coord_fixed() +
+    
+    # geom_bar(stat="identity", width=1, color="black", size = 0.1) +
+  #coord_polar("y", start=0, direction = -1)+
+      theme_void() + 
+    ### add labels
+      # geom_text_repel(aes(x = 0, y = pos, 
+      #                     label = label), 
+      #                 size = 3, nudge_x = 1)+
+    ggtitle(str_replace_all(i,"__",", "))+
+  theme(plot.title = element_text(hjust = 0.5),
+        ) 
+  # plot(p1)
+
+  list_of_plots[[i]] <- p1 + theme(legend.position="none")
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+### get the legend
+#https://stackoverflow.com/questions/13649473/add-a-common-legend-for-combined-ggplots
+g_legend<-function(a.gplot){
+  tmp <- ggplot_gtable(ggplot_build(a.gplot))
+  leg <- which(sapply(tmp$grobs, function(x) x$name) == "guide-box")
+  legend <- tmp$grobs[[leg]]
+  return(legend)}
+### add empty filler
+list_of_plots[[length(list_of_plots)+1]]<-ggplot()+theme_void()
+list_of_plots[[length(list_of_plots)+2]]<-g_legend(p1) ### grabs from the l
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+
+```
+
+## Figure 6 {.tabset}
+
+GC populations
+
+```{r prep_Fig6}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig6"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("D3","D8","D22",
+            "D8","D22","D22"),
+  "time2"=c("D1","D1","D1",
+            "D3","D3","D8")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig6BE"
+#contrast_name <- "Fig5D_Myeloid_vsD1"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 3
+
+```
+
+```{r differential_expression_Fig6, ref.label=c('differential_expression')}
+```
+
+### Fig 6B
+
+```{r setVars_Fig6B}
+varcomp_to_plot <- c("LN__CD4_Tfh_Ki67pos","LN__GC_CD4_Tfh_Ki67pos",
+                     "LN__gCD8_Tfh_Ki67pos","LN__B_Cells_Bcl6pos_Pct_B_cells")
+```
+
+```{r Log2FCest_heatmaps_setup_CellPops_Fig6B, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
+```
+
+```{r Log2FCest_heatmaps_Fig6B, ref.label=c('Log2FCest_heatmaps'), results = 'asis', fig.height=7, fig.width=10}
+```
+
+### Fig 6C {.tabset}
+
+spearman correlation vs self
+
+```{r prepForDiffCounts_CellPops__Fig6C}
+
+########## generate "dataset" format - wide, no metadata with columns = samples (including vax, timepoint, animal), rows = analytes
+##### has analyte names as rownames AND as column labeled gene
+df <- data_to_use %>%
+  ### remove metadata
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2
+  tidyr::pivot_longer(cols=!sampleName, names_to = "analyte", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL) %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "sampleName", values_from = "log2_value") %>%
+  dplyr::mutate(Gene=analyte) %>%
+  column_to_rownames("analyte") %>%
+  relocate(Gene)
+
+
+analyte_columns <- rownames(df)
+
+
+## generate metadata only
+targetfile_full <- data_to_use %>%
+  ### remove data columns
+  dplyr::select(-all_of(analyte_columns))
+
+id_var_of_interest <- "sampleName"
+var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+## designate covariates with Day related first, then id
+covariates=c("Day","MacaqueID")
+
+contrasts <- c("D3-D1","D8-D1","D22-D1")
+
+contrast_name <- "Fig6C_GC"
+
+### for CorrVsSelf
+set_names_to_use <- c(paste0(c("D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC_withinCP"))
+vars_for_selfCorr <- varcomp_to_plot
+```
+
+```{r diff_counts_calcs__Fig6C, ref.label=c('diff_counts_calcs'), include = FALSE}
+```
+
+```{r CorrPlotting_vsSelf, results='asis', fig.height=3,fig.width=3}
+corr_tag_name <- "CorrVsSelf"
+set_name_labels <- data.frame("set_name"=set_names_to_use,
+                              "label"=c("D8vsD1 (top)", "D22vsD1 (bottom)"))
+
+fullcombo_df_long <- data.frame()
+for(set_name in set_names_to_use){
+  
+  ######## calculate correlation
+  cor_method <- "spearman"
+  
+  
+curr_ds <- list_of_diff_counts[[paste0(contrast_name)]] %>%
+  ### trim to only the vars desired
+  dplyr::filter(Gene %in% vars_for_selfCorr) %>%
+  column_to_rownames("Gene")
+
+  curr_df <- data.frame(t(curr_ds)) %>%
+    
+    ### trim to only tp of interest
+    rownames_to_column("sampleName") %>%
+    dplyr::filter(grepl(str_before_first(set_name,"_"),sampleName)) %>%
+    ### be sure sorted
+    dplyr::arrange(sampleName) %>%
+    column_to_rownames("sampleName") %>%
+    #### then remove columns with all NA
+    select_if(~ !all(is.na(.))) %>%
+    ### be sure numeric
+    mutate_if(is.character, as.numeric)
+  
+
+
+    
+    ## generate cor matrix 
+  cor_mat <- cor(as.matrix(signif(curr_df,7)), method = cor_method, use="pa")
+ 
+  ## raw p
+  cor_test_mat <- data.frame(matrix(NA, nrow=dim(curr_df)[2], ncol=dim(curr_df)[2]))
+  rownames(cor_test_mat) <- colnames(curr_df)
+  colnames(cor_test_mat) <- colnames(curr_df)
+  
+  for(curr1 in colnames(curr_df)) {
+    for(curr2 in colnames(curr_df)) {
+      cor_test_mat[curr1, curr2] <- 
+        cor.test(as.matrix(signif(curr_df,7))[,curr1], 
+                 as.matrix(signif(curr_df,7))[,curr2], 
+                 method = cor_method, use="pa")$p.value
+    }
+  }
+   
+ ## don't bother adjusting since won't be symmetric 
+  # cor_test_adj_mat <- cor_test_mat #duplicate dataframe to replace values
+  # for(curr_assay in colnames(curr_df1)) {
+  #   cor_test_adj_mat[curr_assay,] <- p.adjust(cor_test_mat[curr_assay,], method = "BH")
+  # }
+
+ 
+    
+    
+    raw_or_adj <- "raw"
+    ann_pval_level <- 0.05
+    trim_pval_level <- 0.05
+     
+          cat(" ", paste0(raw_or_adj," p < ", trim_pval_level),"\n")
+    cat("\n")
+    
+    
+    cat(" ", paste0("untrimmed = all analytes"),"\n")
+    cat("\n")
+    
+    cat(" ", paste0("trimmed = only analytes with at least one association p < ",trim_pval_level),"\n")
+    cat("\n")
+    cat(" ", paste0("p-value for stars annotation < ",ann_pval_level),"\n")
+    cat("\n")
+    
+    
+    cat("\n")
+    cat(' \n \n') ### this is the key!
+    
+    order <- "alphabet"
+  
+  vars_ann <- data.frame(cor_mat) %>%
+    rownames_to_column() %>%
+    arrange(rowname)
+  ordered_vars_to_use <- vars_ann$rowname
+  
+  
+  ### need this in case have only since variable being compared        
+  cor_mat_for_plot <- as.matrix(cor_mat[ordered_vars_to_use,ordered_vars_to_use])
+  colnames(cor_mat_for_plot) <- ordered_vars_to_use
+  rownames(cor_mat_for_plot) <- ordered_vars_to_use
+  
+
+    cor_test_mat_for_plot <- as.matrix(cor_test_mat[ordered_vars_to_use,ordered_vars_to_use])
+   rownames(cor_test_mat_for_plot) <- ordered_vars_to_use
+  colnames(cor_test_mat_for_plot) <- ordered_vars_to_use 
+  #### set diag to 1, so won't be sig
+  diag(cor_test_mat_for_plot) <- 1
+  
+  legend_ratio = 0.3
+  text_size = 0.3
+  
+
+     cat("#### ", paste0(set_name_labels$label[which(set_name_labels$set_name == set_name)]),"\n")
+    cat("\n")
+    
+  
+    
+  
+  if(length(which(cor_test_mat_for_plot <  as.numeric(ann_pval_level))) == 0){
+    
+    
+    corrplot::corrplot(cor_mat_for_plot, method = 'square', 
+                       is.corr = TRUE, #since symmetric
+                        type = 'lower', diag = FALSE,
+                       p.mat = cor_test_mat_for_plot,
+                       sig.level = as.numeric(ann_pval_level), ## doesn't work if none are sig
+                       #sig.level = 0.1,#set p < 0.05 to blank
+                       insig='pch',
+                       pch.cex = 1.2, pch.col = 'black',tl.col = 'black',tl.cex=text_size,
+                       ##legend
+                       cl.ratio = legend_ratio, #cl.cex = 2,
+                       
+                       #addCoef.col ='grey80', 
+                       #number.cex = 0.5, #add corr coeff to sig circles
+                       order = order, ## CANNOT ORDER ASSYMMETRIC
+                       col = rev(COL2('PuOr',1000)), ##make orange positive
+                       col.lim = c(-1,1) ##set limits to be the same across plots
+                       # title = vaccine_groups[i], mar=c(0,0,1,0) # http://stackoverflow.com/a/14754408/54964
+    )
+    
+    
+    cat("\n")
+    cat(' \n \n') ### this is the key!
+    
+   
+    
+  }else{
+    #### otherwise can use the stars
+    corrplot::corrplot(cor_mat_for_plot, method = 'square', 
+                       is.corr = TRUE, #since symmetric
+                        type = 'lower', diag = FALSE,
+                    p.mat = cor_test_mat_for_plot,
+                       sig.level = as.numeric(ann_pval_level), 
+                       insig='label_sig',  #set p < 0.05 to blank
+                       pch.cex = 1.2, pch.col = 'white',tl.col = 'black',tl.cex=text_size,
+                       ##legend
+                       cl.ratio = legend_ratio, #cl.cex = 2,
+                       #addCoef.col ='grey80', 
+                       #number.cex = 0.5, #add corr coeff to sig circles
+                       order = order, ## CANNOT ORDER ASSYMMETRIC
+                       col = rev(COL2('PuOr',1000)), ##make orange positive
+                       col.lim = c(-1,1) ##set limits to be the same across plots
+                       # title = vaccine_groups[i], mar=c(0,0,1,0) # http://stackoverflow.com/a/14754408/54964
+    )
+    
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+  }
+   
+    cat("\n")
+    cat(' \n \n') ### this is the key!
+    
+    
+    
+    ######### save the stats
+       ### write function for converting the cor_mat to long format df
+    corr_to_longSELF <- function(mat){
+      data.frame(mat) %>%
+        rownames_to_column("celltype1") %>%
+        tidyr::pivot_longer(!celltype1, names_to = "celltype2", values_to = "value") %>%
+        dplyr::mutate(celltype1_vs_2 = paste0(celltype1,"_vs_",celltype2))
+      
+    }
+
+    
+    
+    
+    
+    #### convert to long
+    cor_long <-  corr_to_longSELF(cor_mat)   
+    if(raw_or_adj == "raw"){
+      p_long <-  corr_to_longSELF(cor_test_mat)     
+    }else{
+      p_long <-  corr_to_longSELF(cor_test_adj_mat)     
+    }
+    
+    #### combine cor and p long dfs
+    curr_df_long <- dplyr::left_join(cor_long,p_long, by = c("celltype1","celltype2","celltype1_vs_2")) %>%
+      ### rename values to be useful
+      dplyr::rename(corr_coef=value.x,p=value.y) %>%
+      ### add column with set_name
+      dplyr::mutate(timepoint = paste0(str_replace_all(set_name,"-","vs")))
+
+  
+  ### add to fullcombo
+  fullcombo_df_long <- rbind(fullcombo_df_long,curr_df_long)
+
+    
+   
+}
+
+
+cat("\n")
+cat(' \n \n') ### this is the key!
+
+  CorrName <- paste0(contrast_name,"__",corr_tag_name)
+### add to stats master list
+list_of_stats[[paste0(CorrName)]] <- fullcombo_df_long %>% 
+  dplyr::relocate(celltype1, celltype2, corr_coef, p, timepoint)
+
+
+```
+
+### Fig 6D
+
+```{r prep_Fig6D}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops, 1 for IHC)
+prior_to_useIHC <- 1
+
+##### select data
+curr_df_long <- list_of_datasets[["IHC"]] %>%
+  ### filter to only vars of interest = GC zone
+  dplyr::filter(zone == "GC") %>%
+  ### add log10
+  dplyr::mutate(celltype_zone = paste0(celltype,"_",zone),
+                value_plus = value_raw + as.numeric(prior_to_useIHC),
+                value_log10 = log10(value_plus),
+                raw_value = NULL,
+                ### factorize time
+                Day = factor(Day, c("D1","D3","D8","D22"))
+
+                ) 
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig6D_IHC"
+#contrast_name <- "Fig5D_Myeloid_vsD1"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 2
+
+```
+
+IHC differences between timepoints (within a zone) 
+
+$log10(value + 1)_{zoneXcelltypeY}$ ~ Time + (1|MacaqueID)
+
+Contrasts within D3, D8 D22 are only for LION treatments, since CTRLs have just one timepoint
+
+
+```{r lmerTest_byTime, include = FALSE}
+timepoint_comparison_df <- data.frame("time1"=c("D1","D1","D1","D3","D3","D8"),
+                                      "time2"=c("D3","D8","D22","D8","D22","D22")) %>%
+  dplyr::mutate(name = paste0(time2,"vs",time1))
+
+##### to collect pvalues for lmer
+pval_df <- data.frame(matrix(ncol = 7, nrow = 0))
+colnames(pval_df) <- c("variable","contrast","lmer_est","lmer_praw","numMacaque_sig_pos","numMacaque_sig_neg")
+
+### to collect pvalues for separate linear models for each animal
+animal_pval_df <- data.frame(matrix(ncol = 11, nrow = 0))
+colnames(animal_pval_df) <- c("MacaqueID","variable","contrast",
+                               "Intercept_est","Intercept_stdError","Intercept_tvalue","Intercept_pvalue",
+                               "Slope_est","Slope_stdError","Slope_tvalue","Slope_pvalue")
+
+### for each celltype/zone
+for(curr_cz in unique(curr_df_long$celltype_zone)){
+  ### for each pair of timepoints to compare
+  for(i in 1:nrow(timepoint_comparison_df)){
+    
+
+    curr_df <- curr_df_long[which(curr_df_long$celltype_zone == curr_cz &
+                                    
+                                    curr_df_long$Day %in% c(timepoint_comparison_df$time1[i],timepoint_comparison_df$time2[i])),] 
+        #### only if have both timepoints
+    if(length(unique(curr_df$Day)) == 2){
+      ### print curr_cz
+       cat("#### ",paste0(curr_cz,"_", timepoint_comparison_df$name[i]),"\n")
+cat("\n")
+
+
+
+##### only if have animal for both timepoints
+if(timepoint_comparison_df$time1[i] != "D1"){
+  
+    ##### first fit separate model for each animal
+    curr_lmlist <- as.data.frame(summary(lmList(value_log10 ~ Day|MacaqueID, data = curr_df))$coefficients) %>%
+      dplyr::mutate(variable = paste0(curr_cz),
+                    contrast=timepoint_comparison_df$name[i]) %>%
+      dplyr::relocate(variable, contrast) %>%
+      rownames_to_column("MacaqueID")
+    
+    colnames(curr_lmlist) <- c("MacaqueID","variable","contrast",
+                               "Intercept_est","Intercept_stdError","Intercept_tvalue","Intercept_pvalue",
+                               "Slope_est","Slope_stdError","Slope_tvalue","Slope_pvalue")
+    
+    animal_pval_df <- rbind(animal_pval_df, curr_lmlist)
+
+}else{
+  curr_lmlist <- data.frame("numMacaque_sig_pos"=NA,
+                                         
+                                         "numMacaque_sig_neg"=NA)
+}
+       #### setup lmer
+    curr_lmer <- lmerTest::lmer(value_log10 ~ Day + (1|MacaqueID), data = curr_df, REML = F)
+    #### using lmerTest's swaith p value
+    curr_p <- summary(curr_lmer)$coefficients[2,"Pr(>|t|)"]
+    curr_est <- summary(curr_lmer)$coefficients[2,"Estimate"]
+    
+    ### alternatively could use anova
+    # curr_null <- lmerTest::lmer(value_log10 ~ (1|MacaqueID), data = curr_df, REML = F)
+    # curr_p2 <- anova(curr_null, curr_lmer)[2,"Pr(>Chisq)"]
+
+    # 
+    pval_df <- rbind(pval_df, data.frame("variable"=paste0(curr_cz),
+                                         "contrast"=timepoint_comparison_df$name[i],
+                                         "lmer_est"=curr_est,
+                                         "lmer_praw"=curr_p,
+                                         "numMacaque_sig_pos"=length(which(curr_lmlist$Slope_pvalue < 0.05 & curr_lmlist$Slope_est > 0)),
+                                         
+                                         "numMacaque_sig_neg"=length(which(curr_lmlist$Slope_pvalue < 0.05 & curr_lmlist$Slope_est < 0))
+                                        
+                                         ))
+    
+
+      
+    }else{
+      pval_df <- rbind(pval_df, data.frame("variable"=paste0(curr_cz),
+                                         "contrast"=timepoint_comparison_df$name[i],
+                                         "lmer_est"=NA,
+                                         "lmer_praw"=NA,
+                                         "numMacaque_sig_pos"=NA,
+                                         
+                                         "numMacaque_sig_neg"=NA
+                                        
+                                         ))
+      
+      
+
+      
+    }
+    
+      
+  }
+}
+
+
+
+#### add BH adj pval
+pval_df$lmer_padj <- p.adjust(pval_df$lmer_praw, method = 'BH')
+
+
+### save
+list_of_stats[[paste0(contrast_name,"_lmerTestByTime")]] <- pval_df
+list_of_stats[[paste0(contrast_name,"_lmPerAnimalByTime")]] <- animal_pval_df
+
+```
+
+
+```{r plotsPvalsByTime_oneZonePerPlot_LOGSCALE, results='asis', fig.height=4, fig.width=8}
+### if want to trim which p values on plot, these are are all
+contrasts_to_keep <- c("vsD1","vsD3","vsD8")
+treatments_to_keep <- c("LION","CTRL")
+### Scatterplots by time/zone
+
+#### read in full pvals
+pval_df_full <- list_of_stats[[paste0(contrast_name,"_lmerTestByTime")]]
+
+### trim to contrasts
+  pval_df_trimmed1 <- pval_df_full %>%
+    dplyr::filter(grepl(paste(contrasts_to_keep, collapse = '|'),contrast)) %>%
+    dplyr::filter(!is.na(lmer_est))
+
+#### for each celltype "TAB", plot the median value (across replicates) for each animal/variable/zone/timepoint
+
+cz_tabs <- unique(pval_df_trimmed1$variable)
+
+ y_scale_df <- data.frame("celltype"=c("CD4","CD8"),
+                          "color"=c("#08F8F9","#F942F1"),
+                             "max"=c(5,5),
+                          "min"=c(0,0),
+                             "to_plot"=c(11,11))
+ list_of_plots <- list()
+ ### for each celltype/zone
+for(curr_tab in cz_tabs){
+  ## first trim pvals to the celltype "TAB"
+  pval_df_trimmed <- pval_df_trimmed1[grepl(curr_tab,pval_df_trimmed1$variable),] 
+  curr_celltype <- str_before_first(curr_tab,"_")
+  curr_zone <- str_after_first(curr_tab,"_")
+  
+  ##### also trim the timepoint_comparison_df
+curr_timepoint_comparison_df <- timepoint_comparison_df %>%
+  dplyr::filter(grepl(paste(contrasts_to_keep, collapse = '|'),name))
+
+#### put pvals in format for plotting, tribbles
+list_of_pvals <- list()
+for (i in unique(pval_df_trimmed$variable)){
+  pval_df <- tibble::tribble(~group1, ~group2, ~p, ~est, ~dir)
+  for (g in 1:nrow(curr_timepoint_comparison_df)){
+    
+    #### only if have the timepoints
+    if(dim(pval_df_trimmed[which(pval_df_trimmed$variable == i & pval_df_trimmed$contrast == curr_timepoint_comparison_df[g,"name"]),])[1] > 0){
+        ### tribble
+    curr_df <- tibble::tribble(~group1, ~group2, ~p, ~est,
+                               curr_timepoint_comparison_df[g,"time1"],curr_timepoint_comparison_df[g,"time2"],
+                               pval_df_trimmed[which(pval_df_trimmed$variable == i & pval_df_trimmed$contrast == curr_timepoint_comparison_df[g,"name"]),"lmer_praw"],
+                               pval_df_trimmed[which(pval_df_trimmed$variable == i & pval_df_trimmed$contrast == curr_timepoint_comparison_df[g,"name"]),"lmer_est"]
+                               ) %>%
+      ### add dir
+      dplyr::mutate(dir = ifelse(p < params$pCutoff, 
+                                   ifelse(est > 0, "up","down"),
+                                   "not_sig"),
+                    ### set sig figs
+                    p = signif(p,3)) 
+      
+      
+    
+    pval_df <- add_row(pval_df, curr_df)
+
+    }else{
+      pval_df <- pval_df
+    }
+     }
+  list_of_pvals[[paste0(curr_tab)]] <- pval_df
+}
+
+
+
+
+#### prep phen_to_plot
+#### add additional factorized vars
+phen_to_plot <- curr_df_long %>%
+  ### filter to only lion
+  dplyr::filter(treatment %in% treatments_to_keep) %>%
+  ### filter variables
+  dplyr::filter(celltype_zone %in% pval_df_trimmed$variable) %>%
+  ### factorize
+  dplyr::mutate(zone = factor(zone, c("GC","noGC","TCZ")),
+                celltype = factor(celltype, c("CD4","CD8"))) %>%
+     dplyr::arrange(MacaqueID)
+
+plot_sig_only <- "no"
+
+  
+   size_for_points <- 1
+   stroke_for_points <- 0.4
+   dodge_for_points <- 0.9
+
+
+  max_y <- y_scale_df$max[which(y_scale_df$celltype == curr_celltype)] #### set this to be consistent for each celltype
+
+     min_y <- y_scale_df$min[which(y_scale_df$celltype == curr_celltype)]
+   maxy_y_to_plot <-  y_scale_df$to_plot[which(y_scale_df$celltype == curr_celltype)]
+
+  
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(curr_timepoint_comparison_df),
+                          length(which(pval_df_trimmed[i,] %>% dplyr::select(-variable) < as.double(params$pCutoff))) #### fix
+  )
+  
+  color_df <- data.frame("zone"=c("GC","noGC","TCZ"),
+                       "shape" = c(21, 22, 24))
+
+
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = Day, y = value_log10, 
+                                shape = zone, 
+                                fill = celltype#,
+                               # group = MacaqueID
+                                )) + 
+    scale_fill_manual(values=y_scale_df$color[which(y_scale_df$celltype == curr_celltype)]) +  
+    scale_color_manual(values=y_scale_df$color[which(y_scale_df$celltype == curr_celltype)]) +  
+    scale_shape_manual(values=color_df$shape[which(color_df$zone == curr_zone)]) +
+    #scale_shape_manual(values=shapes_df$shape_for_plot[which(shapes_df$animal %in% unique(phen_to_plot$MacaqueID))]) +
+#geom_line(color="grey",linetype = "dashed")+
+    
+    geom_beeswarm(aes(
+      #fill=zone,
+      #color=zone,
+      shape=zone,
+    ), fill="white", color="black",size = size_for_points, stroke = stroke_for_points, alpha = 0.9,corral = "random", corral.width = 0.5,
+    dodge.width = dodge_for_points)+ ## makes side by side groups
+       
+    # geom_point(aes(
+    #   fill=zone,
+    #   color=zone,
+    #   shape=zone,
+    # ), size = 3, stroke = 0.8, alpha = 0.9)+ ## makes side by side groups
+    #geom_text_repel() + 
+    scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot), breaks = seq(min_y,maxy_y_to_plot,1))+
+    
+    #rremove("x.axis")+  
+    theme_bw()+
+    labs(y = paste0(curr_celltype," ",curr_zone," for all animals (log10)")#,
+         #title = paste0(i)
+    )+
+    theme(legend.position="right", legend.box = "vertical",
+          #axis.ticks.x = element_blank(),
+          #axis.text.x = element_blank(),
+          plot.title = element_text(hjust = 0.5), #centers title
+          panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+          panel.border = element_blank(), axis.line = element_line(colour = "black")
+    )
+
+  ##### add p values
+
+ 
+  ### for each zone
+ 
+     first_interval_to_use <- 0.05
+      interval_to_use <- 0.15
+    
+
+           pvals_for_plot <- list_of_pvals[[curr_tab]] %>% 
+                           dplyr::mutate(zone=paste0(curr_zone),
+                                         celltype=paste0(curr_celltype),
+                                         MacaqueID="p") %>% 
+                        # add_x_position(x="Day") %>% ### does it in alphabetical order
+                         rownames_to_column() %>% 
+                         dplyr::mutate(xmin = ifelse(group1 == "D1",1,
+                                                     ifelse(group1 == "D3",2,3)), 
+                                       xmax = ifelse(group2 == "D3",2,
+                                                     ifelse(group2 == "D8",3,4
+                                                            )), 
+                                       y.position = c(max_y+first_interval_to_use*range_y+interval_to_use*as.numeric(rowname)*range_y))
+        
+    
+        for(curr_row in 1:nrow(pvals_for_plot)){
+            p <- p +
+       
+         
+    stat_pvalue_manual(pvals_for_plot[curr_row,],
+                       label = "p",size = 3.5,tip.length = 0.01,
+                       bracket.size = 0.2,
+                       
+                       color = ifelse(pvals_for_plot$dir[curr_row] == "up","red",
+                                                      ifelse(pvals_for_plot$dir[curr_row] == "down","blue",
+                                                             ifelse(pvals_for_plot$dir[curr_row]== "not_sig","black","grey"))))
+    
+        }
+      
+      
+      #### for lumped together add the median and quantiles
+    p <- p+
+      geom_violin(data = phen_to_plot, aes(x = Day, y = value_log10, fill = celltype), draw_quantiles = c(0.25, 0.5, 0.75), color = "grey40", alpha = 0.2,
+                  inherit.aes = FALSE, scale = "width", adjust =0.5)+
+           # scale_color_manual(values = c("purple4","orange","grey60","black","black"))+
+      stat_summary(fun="mean", geom="crossbar", aes(color = "mean"), color = "black", linetype = "11", size = 0.3) +
+      stat_summary(fun="median", geom="crossbar",aes(color = "median"), color = "black", linetype = "solid", size = 0.3)
+ 
+     
+      # plot(p)
+  
+cat('\n')
+cat(' \n \n') ### this is the key! 
+  
+
+     
+     
+     
+
+   
+
+  
+cat('\n')
+cat(' \n \n') ### this is the key! 
+  
+  
+ # plot(p)
+  list_of_plots[[paste0(curr_tab)]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+```
+
+
+
+
+### Fig 6E
+
+```{r setVars_Fig6E}
+varcomp_to_plot <- c("LN__CD4_Tfh_CXCR3neg_Ki67pos","LN__CD4_Tfh_CXCR3pos_Ki67pos",
+                     "LN__GC_CD4_Tfh_CXCR3neg_Ki67pos","LN__GC_CD4_Tfh_CXCR3pos_Ki67pos",
+                     "LN__CD8_Tfh_CXCR3neg_Ki67pos","LN__CD8_Tfh_CXCR3pos_Ki67pos")
+
+#### reset contrast name to full p values
+contrast_name <- "Fig6BE"
+```
+
+```{r Log2FCest_heatmaps_setup_CellPops_Fig6E, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
+```
+
+```{r Log2FCest_heatmaps_Fig6E, ref.label=c('Log2FCest_heatmaps'), results = 'asis', fig.height=7, fig.width=10}
+```
+
+### Fig 6F
+
+Spearman correlation between MSD D2vsD1 and GC populations
+
+```{r prepForDiffCounts_CellPops__Fig6FG}
+
+########## generate "dataset" format - wide, no metadata with columns = samples (including vax, timepoint, animal), rows = analytes
+##### has analyte names as rownames AND as column labeled gene
+df <- data_to_use %>%
+  ### remove metadata
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2
+  tidyr::pivot_longer(cols=!sampleName, names_to = "analyte", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL) %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "sampleName", values_from = "log2_value") %>%
+  dplyr::mutate(Gene=analyte) %>%
+  column_to_rownames("analyte") %>%
+  relocate(Gene)
+
+
+analyte_columns <- rownames(df)
+
+
+## generate metadata only
+targetfile_full <- data_to_use %>%
+  ### remove data columns
+  dplyr::select(-all_of(analyte_columns))
+
+id_var_of_interest <- "sampleName"
+var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+## designate covariates with Day related first, then id
+covariates=c("Day","MacaqueID")
+
+contrasts <- c("D3-D1","D8-D1","D22-D1")
+
+contrast_name <- "Fig6FG_GC"
+
+raw_or_adj <- "raw"
+```
+
+```{r diff_counts_calcs__Fig6FG, ref.label=c('diff_counts_calcs'),  include = FALSE}
+```
+
+```{r spearmanCorrVsMSD__Fig6F, ref.label=c('spearmanCorrVsMSD')}
+```
+
+```{r Fig6F__vsMSD_LNposOnlySELECTEDmsd_setup}
+
+barbara_order <- c("LN__CD4_Tfh_CXCR3pos_Ki67pos",
+                   "LN__CD4_Tfh_CXCR3neg_Ki67pos",
+                   "LN__GC_CD4_Tfh_CXCR3pos_Ki67pos",
+                   "LN__GC_CD4_Tfh_CXCR3neg_Ki67pos",
+                   "LN__CD8_Tfh_CXCR3pos_Ki67pos",
+                   "LN__CD8_Tfh_CXCR3neg_Ki67pos",
+                   "LN__Bcells_GC_BCL6pos_ki67pos_PctBCells")
+ 
+
+## only for the Intervals
+timepoints_to_use <- paste0(c("D3-D1","D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC")
+TP_name <- "Intervals"
+
+corr_tag_name <- "CorrVsMSD" 
+raw_or_adj <- "raw"
+cor_method <- "spearman"
+trim_pval_level <- 0.05
+all_or_selected <- "selected"
+assay_arrangement <- c("CCL2.MCP.1","CCL3.MIP.1a","CCL4.MIP.1b","CCL8.MCP.2",
+                       "CXCL10.IP.10","CXCL11.ITAC","M.CSF",
+                       "CCL26.Eotaxin.3","CCL13.MCP.4","CXCL12.SDF.1a",
+                       "FLT3L","IL.7","CX3CL1.Fractalkine") ### if trimming/ordering assays
+
+
+### set pos/neg/both
+directions_to_use <- c("pos")
+assays_to_exclude <- c("")
+```
+
+`r paste0(raw_or_adj," p < ",trim_pval_level)`
+
+```{r combinedBubblePlot__Fig6F_LN, ref.label=c('combinedBubblePlot'), results='asis', fig.height=7, fig.width=6}
+```
+
+### Fig 6G
+
+Spearman correlation between Abs & GC populations
+
+Compare each cell population to Ab levels combining the following "paired" timepoints:
+
+Cell pop D1 & Ab D1
+
+Cell pop D3/4 & Ab D8
+
+Cell pop D8 & Ab D15
+
+Cell pop D22 & Ab D22
+
+
+```{r prepForDiffCounts_Abs__Fig6G}
+
+curr_figure_name <- "Antibody"
+##### select data
+data_Abs <- list_of_datasets[["Abs"]] %>%
+  ### filter to only vars of interest (removes NAb)
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) 
+
+########## generate "dataset" format for Abs - wide, no metadata with columns = samples (including vax, timepoint, animal), rows = analytes
+##### has analyte names as rownames AND as column labeled gene
+df <- data_Abs %>%
+  ### remove metadata
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2
+  tidyr::pivot_longer(cols=!sampleName, names_to = "analyte", values_to = "raw_value") %>%
+  dplyr::mutate(log10_value = log10(raw_value), ### no prior
+                raw_value = NULL,
+                ### remove raw from analyte
+                analyte = str_replace_all(analyte,"_raw","_log10")) %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "sampleName", values_from = "log10_value") %>%
+  dplyr::mutate(Gene=analyte) %>%
+  column_to_rownames("analyte") %>%
+  relocate(Gene)
+
+
+analyte_columns <- rownames(df)
+
+
+## generate metadata only
+targetfile_full <- data_Abs[,c("sampleName","MacaqueID","Day")]
+
+id_var_of_interest <- "sampleName"
+var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+## designate covariates with Day related first, then id
+covariates=c("Day","MacaqueID")
+
+contrasts <- c("D8-D1","D15-D1","D22-D1")
+
+contrast_name <- "Fig6G_Abs"
+```
+
+```{r diff_counts_calcs__Fig6G_Abs, ref.label=c('diff_counts_calcs'), include = FALSE}
+```
+
+
+```{r setCorrDataset__vsAbPairedTPs_Fig6G}
+vars_for_AbCorr <-c("LN__CD4_Tfh_CXCR3neg_Ki67pos",
+                   "LN__CD4_Tfh_CXCR3pos_Ki67pos",
+                   "LN__GC_CD4_Tfh_CXCR3neg_Ki67pos",
+                   "LN__GC_CD4_Tfh_CXCR3pos_Ki67pos",
+                   "LN__CD8_Tfh_CXCR3neg_Ki67pos",
+                   "LN__CD8_Tfh_CXCR3pos_Ki67pos",
+                   "LN__Bcells_GC_BCL6pos_ki67pos_PctBCells")
+### load GC pops
+contrast_name <- "Fig6FG_GC"
+curr_ds <- list_of_diff_counts[[paste0(contrast_name)]] %>%
+  ### trim to only the vars desired
+  dplyr::filter(Gene %in% vars_for_AbCorr) %>%
+  column_to_rownames("Gene")
+
+
+### load Abs
+contrast_name <- "Fig6G_Abs"
+curr_ds_abs <- list_of_diff_counts[[paste0(contrast_name)]] %>%
+  column_to_rownames("Gene") %>%
+  t() %>%
+  data.frame() %>%
+  #### remove rows with all NA
+  filter(if_any(everything(), ~ !is.na(.))) %>%
+  ### fix names
+  rownames_to_column("Animal_TP") %>%
+  dplyr::mutate(#Animal_TP = str_replace_all(Animal_TP,"-","vs"),
+                  #### also unify with cell pops
+                Animal_TP = str_replace_all(Animal_TP,"D8-D1","D3-D1"),
+                Animal_TP = str_replace_all(Animal_TP,"D15-D1","D8-D1")) 
+  
+
+
+#### set new for the stats
+contrast_name <- "Fig6G_GC"
+corr_tag_name <- "CorrVsAbPaired4TPs"
+raw_or_adj <- "raw"
+```
+
+
+```{r CorrPlotting_vsAbs_PairedTPs, results='asis', fig.width=6}
+
+
+set_name <- "Intervals"
+  ######## calculate correlation
+  cor_method <- "spearman"
+  
+  #### rows = animal (trimmed to tp "set_name"), columns = vars
+  curr_df1 <- data.frame(t(curr_ds)) %>%
+    ## remove rows with all NAs
+    filter(if_any(everything(), ~ !is.na(.))) %>%    
+    ### be sure sorted
+    rownames_to_column("sampleName") %>%
+    dplyr::arrange(sampleName) %>%
+    column_to_rownames("sampleName") %>%
+    #### then remove columns with all NA
+    select_if(~ !all(is.na(.))) %>%
+    ### be sure numeric
+    mutate_if(is.character, as.numeric)
+
+  
+  ### rows = animal, columns = vars, including day/interval
+  curr_df2 <- data.frame(curr_ds_abs) %>%
+    ### be sure sorted
+    dplyr::arrange(Animal_TP) %>%
+    column_to_rownames("Animal_TP") %>%
+    #### then remove columns with all NA
+    select_if(~ !all(is.na(.))) %>%
+    ### be sure numeric
+    mutate_if(is.character, as.numeric)
+  
+  
+     CorrName <- paste0(contrast_name,"__",corr_tag_name)
+    
+     ## generate cor matrix 
+  cor_mat <- cor(as.matrix(signif(curr_df1,7)), as.matrix(signif(curr_df2,7)), method = cor_method, use="pa")
+ 
+  ## raw p
+  cor_test_mat <- data.frame(matrix(NA, nrow=dim(curr_df1)[2], ncol=dim(curr_df2)[2]))
+  rownames(cor_test_mat) <- colnames(curr_df1)
+  colnames(cor_test_mat) <- colnames(curr_df2)
+  
+  for(curr1 in colnames(curr_df1)) {
+    for(curr2 in colnames(curr_df2)) {
+      cor_test_mat[curr1, curr2] <- 
+        cor.test(as.matrix(signif(curr_df1,7)[,curr1]), 
+                 as.matrix(signif(curr_df2,7)[,curr2]), 
+                 method = cor_method, use="pa")$p.value
+    }
+  }
+  
+ ## adj p for multiple comparisons by BH over cytokine assays
+  cor_test_adj_mat <- cor_test_mat #duplicate dataframe to replace values
+  for(curr_assay in colnames(curr_df1)) {
+    cor_test_adj_mat[curr_assay,] <- p.adjust(cor_test_mat[curr_assay,], method = "BH")
+  }
+
+
+  
+    ### write function for converting the cor_mat to long format df
+    corr_to_long <- function(mat){
+      data.frame(mat) %>%
+        rownames_to_column("celltype") %>%
+        tidyr::pivot_longer(!celltype, names_to = "assay", values_to = "value") %>%
+        dplyr::mutate(celltype_assay = paste0(celltype,"_vs_",assay))
+      
+    }
+
+    
+    
+    
+    
+    #### convert to long
+    cor_long <-  corr_to_long(cor_mat)   
+    if(raw_or_adj == "raw"){
+      p_long <-  corr_to_long(cor_test_mat)     
+    }else{
+      p_long <-  corr_to_long(cor_test_adj_mat)     
+    }
+    
+    #### combine cor and p long dfs
+    curr_df_long <- dplyr::left_join(cor_long,p_long, by = c("celltype","assay","celltype_assay")) %>%
+      ### rename values to be useful
+      dplyr::rename(corr_coef=value.x,p=value.y) %>%
+      ### add column with set_name
+      dplyr::mutate(timepoint = paste0(str_replace_all(set_name,"-","vs")))
+
+  
+ 
+### add to stats master list
+list_of_stats[[paste0(CorrName)]] <- curr_df_long %>% 
+  dplyr::relocate(celltype, assay, corr_coef, p, timepoint)  
+    
+    
+    raw_or_adj <- "raw"
+    ann_pval_level <- 0.05
+    trim_pval_level <- 0.05
+   
+    
+    cat("\n")
+    cat(' \n \n') ### this is the key!
+    
+    ######### plotting
+
+  
+  vars_ann <- data.frame(cor_mat) %>%
+    rownames_to_column() %>%
+    arrange(rowname)
+  ordered_vars_to_use <- vars_ann$rowname
+  
+  ABs_ann <- data.frame(t(cor_mat)) %>%
+    rownames_to_column() %>%
+    arrange(rowname)
+  ordered_ABs_to_use <- ABs_ann$rowname
+  
+  
+  ### need this in case have only since variable being compared        
+  cor_mat_for_plot <- as.matrix(cor_mat[ordered_vars_to_use,ordered_ABs_to_use])
+  colnames(cor_mat_for_plot) <- ordered_ABs_to_use
+  
+  if(raw_or_adj == "raw"){
+    cor_test_mat_for_plot <- as.matrix(cor_test_mat[ordered_vars_to_use,ordered_ABs_to_use])
+  }else{
+    cor_test_mat_for_plot <- as.matrix(cor_test_adj_mat[ordered_vars_to_use,ordered_ABs_to_use])
+  }
+  rownames(cor_test_mat_for_plot) <- ordered_vars_to_use
+  colnames(cor_test_mat_for_plot) <- ordered_ABs_to_use          
+  
+  legend_ratio = 0.9
+  text_size = 0.8
+ 
+  star_size <- 3
+  
+  
+  
+  
+    #### plot with the star annotation
+    corrplot::corrplot(cor_mat_for_plot, method = 'square', 
+                       is.corr = FALSE, #since not symmetric
+                       p.mat = cor_test_mat_for_plot,
+                       sig.level = as.numeric(ann_pval_level), 
+                       insig='label_sig',  #set p < 0.05 to blank
+                       pch.cex = star_size, pch.col = 'white',tl.col = 'black',tl.cex=text_size,
+                       ##legend
+                       cl.ratio = legend_ratio, #cl.cex = 2,
+                       #addCoef.col ='grey80', 
+                       #number.cex = 0.5, #add corr coeff to sig circles
+                       #order = order, ## CANNOT ORDER ASSYMMETRIC
+                       col = rev(COL2('PuOr',1000)), ##make orange positive
+                       col.lim = c(-1,1) ##set limits to be the same across plots
+                       # title = vaccine_groups[i], mar=c(0,0,1,0) # http://stackoverflow.com/a/14754408/54964
+    )
+    
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+  
+  
+
+    
+
+
+```
+
+
+
+
+## Supp Figure S5 {.tabset}
+
+### Fig S5A
+
+```{r scatterplots_with_pvalues___FigS5A_prep}
+contrast_name <- "Fig6BE"
+data_to_useFig6 <- data_to_use
+### trim to only vars to plot
+variables_ordered <- c("LN__CD4_Tfh_Ki67pos","LN__GC_CD4_Tfh_Ki67pos",
+                       "LN__gCD8_Tfh_Ki67pos","LN__B_Cells_Bcl6pos_Pct_B_cells")
+data_to_use <- data_to_useFig6 %>%
+  dplyr::select(c(sampleName,MacaqueID,Day,
+                       !!!rlang::syms(variables_ordered))
+  )
+
+num_columns_for_plot <- 4
+
+list_of_stats[["FigS5AC"]] <- data.frame("FigS5A"="stats are in the Fig6BE tab")
+```
+
+```{r scatterplots_with_pvalues___FigS5A, ref.label=c('scatterplots_with_pvalues'), results='asis', fig.height=3, fig.width=10}
+```
+
+
+### Fig S5B
+
+```{r prep_FigS5B}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops, 1 for IHC)
+prior_to_useIHC <- 1
+
+##### select data
+curr_df_long <- list_of_datasets[["IHC"]] %>%
+  ### filter to only vars of interest = GC zone
+  dplyr::filter(zone != "GC") %>%
+  ### add log10
+  dplyr::mutate(celltype_zone = paste0(celltype,"_",zone),
+                value_plus = value_raw + as.numeric(prior_to_useIHC),
+                value_log10 = log10(value_plus),
+                raw_value = NULL,
+                ### factorize time
+                Day = factor(Day, c("D1","D3","D8","D22"))
+
+                ) 
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "FigS5B_IHC"
+#contrast_name <- "Fig5D_Myeloid_vsD1"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 2
+
+```
+
+IHC differences between timepoints (within a zone) 
+
+$log10(value + 1)_{zoneXcelltypeY}$ ~ Time + (1|MacaqueID)
+
+Contrasts within D3, D8 D22 are only for LION treatments, since CTRLs have just one timepoint
+
+
+```{r lmerTest_byTime_FigS5B, ref.label=c('lmerTest_byTime'), include = FALSE}
+```
+
+
+```{r plotsPvalsByTime_oneZonePerPlot_LOGSCALE_FigS5B, ref.label=c('plotsPvalsByTime_oneZonePerPlot_LOGSCALE'), results='asis', fig.height=8, fig.width=8}
+```
+
+
+
+### Fig S5C
+
+```{r scatterplots_with_pvalues___FigS5C_prep}
+contrast_name <- "Fig6BE"
+
+### trim to only vars to plot
+variables_ordered <- c("LN__CD4_Tfh_CXCR3pos_Ki67pos",
+                   "LN__CD4_Tfh_CXCR3neg_Ki67pos",
+                   "LN__GC_CD4_Tfh_CXCR3pos_Ki67pos",
+                   "LN__GC_CD4_Tfh_CXCR3neg_Ki67pos",
+                   "LN__CD8_Tfh_CXCR3pos_Ki67pos",
+                   "LN__CD8_Tfh_CXCR3neg_Ki67pos")
+data_to_use <- data_to_useFig6 %>%
+  dplyr::select(c(sampleName,MacaqueID,Day,
+                       !!!rlang::syms(variables_ordered))
+  )
+
+num_columns_for_plot <- 3
+
+
+```
+
+```{r scatterplots_with_pvalues___FigS5C, ref.label=c('scatterplots_with_pvalues'), results='asis', fig.height=7, fig.width=10}
+```
+
+
+
+## Figure 7 {.tabset}
+
+CD8 Tcm, Tem, Tfc
+
+
+### Fig7A {.tabset}
+
+```{r prep_Fig7A}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig7A"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl(curr_figure_name,colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID)) 
+
+
+curr_phen_long  <- data_to_use %>%
+  ### get average for each day/compartment
+  # first make longer
+  dplyr::select(-sampleName) %>%
+  tidyr::pivot_longer(cols = contains("__"), names_to = "comp_var", values_to = "value") %>%
+  dplyr::mutate(compartment = str_before_first(comp_var,"__"),
+                variable = str_after_last(comp_var,"__"),
+                Day = factor(Day, c("D1","D3","D8","D22"))) %>%
+  
+   
+  ### collect proportion of 100% and means
+  # collect total
+  group_by(compartment, Day, MacaqueID) %>%
+  dplyr::mutate(total_per_comp_time = sum(value)) %>%
+  ungroup() %>%
+  # calculate prop within each animal
+  group_by(compartment, variable, Day, MacaqueID) %>%
+  dplyr::mutate(prop = value / total_per_comp_time *100) %>%  
+  ungroup() %>%
+  # take mean across animals
+  group_by(compartment, variable, Day) %>%
+  dplyr::summarise(mean = mean(prop)) %>%
+   # add comp_time
+  dplyr::mutate(comp_time = paste0(compartment,"__",Day),
+                variable = factor(variable, c("CM","EM","Naive","cTfc","Tcf1","Tcf2"))) %>%
+
+  # sort
+  ungroup() %>%
+  dplyr::arrange(compartment,Day,variable) 
+ 
+  
+ 
+
+
+
+### To name output files
+contrast_name <- "Fig7A_mean_of_props"
+
+list_of_stats[[paste0(contrast_name)]] <- curr_phen_long %>%
+  dplyr::select(-comp_time)
+
+num_columns_for_plot <- 4
+```
+
+```{r Fig7A_pies, fig.width=12, fig.height=6}
+list_of_plots <- list()
+## for each comp_time
+for(i in unique(curr_phen_long$comp_time)){
+ phen_to_plot <- curr_phen_long %>%
+    dplyr::filter(comp_time == i)
+  
+ ### set colors
+  color_df <- data.frame("variable"=unique(curr_phen_long$variable),
+
+                         "fill"=c("#021993","#FF2500","#E9E9E9","#72FDFF","#8F8C01","#FF9400"),
+                         "color"=c("white","white","black","grey40","black","white"))
+
+  #### base plot
+  p <- phen_to_plot %>%
+    ## add in labels
+    dplyr::arrange(variable) %>%
+    dplyr::mutate(label = paste0(variable,"\n",signif(mean,2))) %>%
+    ## plot
+    ggplot(aes(x ="", y = mean, fill=variable)) + 
+    scale_fill_manual(values=c(color_df$fill[which(color_df$variable %in% unique(phen_to_plot$variable))])) + 
+    scale_color_manual(values=c(color_df$color[which(color_df$variable %in% unique(phen_to_plot$variable))])) +
+    geom_bar(stat="identity", width=1, color="grey") +
+  coord_polar("y", start=0, direction = -1)+
+      theme_void() + 
+    ### add labels
+      geom_text(aes(label = label, color = variable), cex = 3,
+            position = position_stack(vjust = 0.5))+
+    ggtitle(str_replace_all(i,"__",", "))+
+  theme(legend.position="none",plot.title = element_text(hjust = 0.5)) 
+  # plot(p)
+  list_of_plots[[i]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+
+```
+
+
+```{r prep_Fig7}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig7"
+
+##### select data
+data_to_use <- list_of_datasets[["CellPops"]] %>%
+  ### filter to only vars of interes
+  dplyr::select(c(sampleName,MacaqueID,Day,!!!rlang::syms(colnames(.)[grepl("Fig7_",colnames(.))]))) %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) %>%
+  ### remove the control rows that are only there for Fig4E
+  dplyr::filter(!grepl("control",MacaqueID))
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("D3","D8","D22",
+            "D8","D22","D22"),
+  "time2"=c("D1","D1","D1",
+            "D3","D3","D8")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig7BC"
+#contrast_name <- "Fig5D_Myeloid_vsD1"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 3
+
+```
+
+```{r differential_expression_Fig7BC, ref.label=c('differential_expression')}
+```
+
+### Fig 7B
+
+```{r setVars_Fig7B}
+varcomp_to_plot <- c("blood__CD8_CM_Ki67pos","LN__CD8_CM_Ki67pos",
+                     "blood__CD8_EM_Ki67pos","LN__CD8_EM_Ki67pos",
+                     "blood__CD8_CM_GzmBpos_Ki67pos","LN__CD8_CM_GzmBpos_Ki67pos",
+                     "blood__CD8_EM_GzmBpos_Ki67pos","LN__CD8_EM_GzmBpos_Ki67pos")
+```
+
+```{r Log2FCest_heatmaps_setup_CellPops_Fig7B, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
+```
+
+```{r Log2FCest_heatmaps_Fig7B, ref.label=c('Log2FCest_heatmaps'), results = 'asis', fig.height=7, fig.width=10}
+```
+
+### Fig 7C
+
+```{r setVars_Fig7C}
+varcomp_to_plot <- c("blood__CD8_Tfh_Ki67pos","LN__CD8_Tfh_Ki67pos",
+                     "blood__CD8_Tfh_GzmBpos","LN__CD8_Tfh_GzmBpos",
+                     "blood__CD8_Tfh_GzmBpos_Ki67pos","LN__CD8_Tfh_GzmBpos_Ki67pos")
+```
+
+```{r Log2FCest_heatmaps_setup_CellPops_Fig7C, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
+```
+
+```{r Log2FCest_heatmaps_Fig7C, ref.label=c('Log2FCest_heatmaps'), results = 'asis', fig.height=7, fig.width=10}
+```
+
+
+### Fig 7D
+
+Spearman correlation between MSD D2vsD1 and CD8 T CM/EM populations
+
+```{r prepForDiffCounts_CellPops__Fig7DE}
+
+########## generate "dataset" format - wide, no metadata with columns = samples (including vax, timepoint, animal), rows = analytes
+##### has analyte names as rownames AND as column labeled gene
+df <- data_to_use %>%
+  ### remove metadata
+  dplyr::select(-c(MacaqueID,Day)) %>%
+  ### make longer to log2
+  tidyr::pivot_longer(cols=!sampleName, names_to = "analyte", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL) %>%
+  ### make wider into dataset format
+  tidyr::pivot_wider(names_from = "sampleName", values_from = "log2_value") %>%
+  dplyr::mutate(Gene=analyte) %>%
+  column_to_rownames("analyte") %>%
+  relocate(Gene)
+
+
+analyte_columns <- rownames(df)
+
+
+## generate metadata only
+targetfile_full <- data_to_use %>%
+  ### remove data columns
+  dplyr::select(-all_of(analyte_columns))
+
+id_var_of_interest <- "sampleName"
+var_of_interest <- "Day" ### matches groups(=timepoints) in contrasts, no MacaqueID
+## designate covariates with Day related first, then id
+covariates=c("Day","MacaqueID")
+
+contrasts <- c("D3-D1","D8-D1","D22-D1")
+
+contrast_name <- "Fig7DE_CD8T"
+raw_or_adj <- "raw"
+```
+
+```{r diff_counts_calcs__Fig7D, ref.label=c('diff_counts_calcs'), include = FALSE}
+```
+
+```{r spearmanCorrVsMSD__Fig7D, ref.label=c('spearmanCorrVsMSD')}
+```
+
+```{r Fig7D__vsMSD_posOnlySELECTEDmsd_setup}
+barbara_order <- c("blood__CD8_CM_Ki67pos",
+                   "blood__CD8_CM_GzmBpos",
+                   "LN__CD8_CM_Ki67pos",
+                   "LN__CD8_CM_GzmBpos",
+                   
+                   
+                   "blood__CD8_EM_Ki67pos",
+                   "blood__CD8_EM_GzmBpos",
+                   "LN__CD8_EM_Ki67pos",
+                   "LN__CD8_EM_GzmBpos")
+ 
+
+## only for the Intervals
+timepoints_to_use <- paste0(c("D3-D1","D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC")
+TP_name <- "Intervals"
+
+corr_tag_name <- "CorrVsMSD" 
+raw_or_adj <- "raw"
+cor_method <- "spearman"
+trim_pval_level <- 0.05
+all_or_selected <- "selected"
+assay_arrangement <- c("CCL2.MCP.1","CCL3.MIP.1a","CCL4.MIP.1b","CCL8.MCP.2",
+                       "CXCL10.IP.10","CXCL11.ITAC","IL.15","M.CSF",
+                       "CCL26.Eotaxin.3","CCL13.MCP.4","CXCL12.SDF.1a",
+                       "FLT3L","IL.7","CX3CL1.Fractalkine","IFN.g") ### if trimming/ordering assays
+### set pos/neg/both
+directions_to_use <- c("pos")
+assays_to_exclude <- c("CCL27.CTACK","IL.5")
+```
+
+`r paste0(raw_or_adj," p < ",trim_pval_level)`
+
+```{r combinedBubblePlot__Fig7D, ref.label=c('combinedBubblePlot'), results='asis', fig.height=7, fig.width=6}
+```
+
+### Fig 7E
+
+Spearman correlation between MSD D2vsD1 and CD8 Tfh populations
+
+```{r Fig7E__vsMSD_posOnlySELECTEDmsd_setup}
+barbara_order <- c("blood__CD8_Tfh_Ki67pos",
+                   "blood__CD8_Tfh_GzmBpos",
+                   
+                   
+                   "LN__CD8_Tfh_Ki67pos",
+                   "LN__CD8_Tfh_GzmBpos")
+ 
+
+## only for the Intervals
+timepoints_to_use <- paste0(c("D3-D1","D8-D1","D22-D1"),"_",str_after_first(params$log2_or_raw,"value_"),"FC")
+TP_name <- "Intervals"
+
+corr_tag_name <- "CorrVsMSD" 
+raw_or_adj <- "raw"
+cor_method <- "spearman"
+trim_pval_level <- 0.05
+all_or_selected <- "selected"
+assay_arrangement <- c("CCL2.MCP.1","CCL3.MIP.1a","CCL4.MIP.1b","CCL8.MCP.2",
+                       "CXCL10.IP.10","CXCL11.ITAC","IL.15","M.CSF",
+                       "CCL26.Eotaxin.3","CCL19.MIP.3b","FLT3L","CCL13.MCP.4","CXCL12.SDF.1a",
+                       "CX3CL1.Fractalkine") ### set pos/neg/both
+directions_to_use <- c("pos")
+assays_to_exclude <- c("CCL27.CTACK","IL.5")
+```
+
+`r paste0(raw_or_adj," p < ",trim_pval_level)`
+
+```{r combinedBubblePlot__Fig7E, ref.label=c('combinedBubblePlot'), results='asis', fig.height=7, fig.width=6}
+```
+
+
+## Figure 8 {.tabset}
+
+AIM assay
+
+```{r prep_Fig8}
+
+##### set prior for log2 (0 for MSD, 1e-4 for cell pops)
+prior_to_use <- 1e-4
+curr_figure_name <- "Fig8"
+
+##### select data
+data_to_use <- list_of_datasets[["AIM"]] %>%
+  ### remove fig name from colnames
+  `colnames<-`(c(str_remove_all(colnames(.),paste0(curr_figure_name,"__")))) 
+
+ 
+### generate dataframe: rows = samples, columns = variables and group for comparison (= TimePoint)
+
+curr_df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,treat)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  dplyr::mutate(log2_value = log2(raw_value + as.double(prior_to_use)),
+                raw_value = NULL,
+                ### combine variable + timepoint
+                MacaqueID = str_before_first(sampleName,"__"),
+                TimePoint = str_after_first(sampleName,"__"), ### includes the vaccine
+                sampleName = NULL
+                ) 
+
+
+### select comparisons to make: time1 - time2
+TimePoints_to_compare <- data.frame(
+  "time1"=c("Spike"),
+  "time2"=c("medium")) %>%
+  dplyr::mutate(name = paste0(time1,"-",time2))
+
+
+
+
+## set raw or adj p-val
+raw_or_adj <- "_pval" #"_adjpval"
+
+### To name output files
+contrast_name <- "Fig8ABDE"
+
+### for scatterplots
+plot_sig_only <- "no"
+num_columns_for_plot <- 3
+
+```
+
+```{r differential_expression_Fig8, ref.label=c('differential_expression')}
+```
+
+### Fig 8A
+
+```{r setVars_Fig8A}
+varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8A",colnames(list_of_datasets[["AIM"]]))] %>%
+  str_remove_all("Fig8__")
+
+num_columns_for_plot <- 1
+```
+
+
+```{r Lineplots_with_pvaluesSPIKE, results='asis', fig.height=4, fig.width=6}
+df_long <- data_to_use %>%
+  dplyr::select(-c(MacaqueID,treat)) %>%
+  ### make longer to log2 
+  tidyr::pivot_longer(cols=!sampleName, names_to = "variable", values_to = "raw_value") %>%
+  ### trim to only the vars in this panel
+  dplyr::filter(variable %in% varcomp_to_plot) %>%
+  ### break out compartment and variable
+  dplyr::mutate(comp_var = variable,
+                compartment = factor(str_before_first(variable,"__"),c("blood","LN")),
+                variable = factor(str_after_first(variable,"__"),varcomp_to_plot),
+                treat = factor(str_after_first(sampleName,"__"),c("medium","Spike")),
+                MacaqueID = str_before_first(sampleName,"__"),
+                sampleName = NULL) %>%
+  dplyr::arrange(compartment, variable)
+
+### set up p-values: rowname (comp_var), contrast, log2FC, pval, adjpval
+pval_df_trimmed <- list_of_stats[[paste0(contrast_name)]] %>%
+  ###make longer
+  tidyr::pivot_longer(cols=!rowname, names_to = "contrast_test", values_to = "value") %>%
+  dplyr::mutate(test = str_after_first(contrast_test,"_"),
+                contrast = str_before_first(contrast_test,"_"),
+                contrast_test = NULL) %>%
+  tidyr::pivot_wider(names_from = "test",values_from = "value") %>%
+  data.frame()
+
+### for each comp_var
+list_of_pvals <- list()
+for (i in unique(pval_df_trimmed$rowname)){
+  pval_df <- tibble::tribble(~group1, ~group2, ~p, ~est, ~dir)
+  for (g in 1:nrow(TimePoints_to_compare)){
+    
+    #### only if have the timepoints
+    if(dim(pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),])[1] > 0){
+        ### tribble
+    curr_df <- tibble::tribble(~group1, ~group2, ~p, ~est,
+                               TimePoints_to_compare[g,"time1"],TimePoints_to_compare[g,"time2"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"pval"],
+                               pval_df_trimmed[which(pval_df_trimmed$rowname == i & pval_df_trimmed$contrast == TimePoints_to_compare[g,"name"]),"log2FC"]
+                               ) %>%
+      ### add dir
+      dplyr::mutate(dir = ifelse(p < params$pCutoff, 
+                                   ifelse(est > 0, "up","down"),
+                                   "not_sig"),
+                    ### set sig figs
+                    p = signif(p,3)) 
+      
+      
+    
+    pval_df <- add_row(pval_df, curr_df)
+
+    }else{
+      pval_df <- pval_df
+    }
+     }
+  list_of_pvals[[paste0(i)]] <- pval_df
+}
+
+
+list_of_plots <- list()
+## for each comp var
+for(i in unique(df_long$comp_var)){
+ phen_to_plot <- df_long %>%
+    dplyr::filter(comp_var == i)
+  
+  # cat("##### ",paste0(i," "),"\n")
+  # cat("\n")
+  max_y <- max(phen_to_plot$raw_value, na.rm=TRUE)
+  min_y <- min(phen_to_plot$raw_value, na.rm=TRUE)
+  range_y <- max_y-min_y
+  num_contrasts <- ifelse(plot_sig_only =="no",
+                          nrow(TimePoints_to_compare),
+                          length(which(list_of_pvals[[paste0(i)]][,"p"] < 0.05))
+  )
+  maxy_y_to_plot <- ifelse(plot_sig_only =="no",
+                                  max_y*(1+0.1*(num_contrasts+1)),
+                                  max_y*(1+0.1*(num_contrasts+1))
+                                         
+                                         )
+  
+  # color_df <- data.frame("variable"=levels(phen_to_plot$variable),
+  #                        
+  #                        "fill"=c("#929292","#008F00","#008EF1"))
+
+  #### base plot
+  p <- ggplot(phen_to_plot, aes(x = treat, y = raw_value)) + 
+#        scale_color_manual(values=c(color_df$fill[which(color_df$variable == str_after_first(i,"__"))])) +  
+
+     geom_point(#aes(color=variable), 
+                   size = 2, shape=16, alpha=0.8, cex = 3)+
+    geom_line(aes(group = MacaqueID), color = "grey30")+
+  scale_y_continuous(limits = c(min_y*(0.8),maxy_y_to_plot)
+                     )+
+    labs(y = paste0(i))+
+  theme_bw()+
+        theme(legend.position="none", 
+            panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
+            panel.border = element_blank(), axis.line = element_line(colour = "black"),
+            axis.title.y = element_text(size = 6), ### make smaller to fit
+            axis.title.x = element_blank())
+  
+  
+  
+  box_pval_cut <- 0.05
+  
+  ##### add p values
+  
+  ### if plotting all p
+if(plot_sig_only == "no"){
+
+  
+  for(l in 1:num_contrasts){
+     p <- p +
+        stat_pvalue_manual(list_of_pvals[[i]][l,], label = "p",size = 2.5,
+                           y.position = max_y+0.1*l*range_y, 
+                           bracket.size = 0.2, tip.length = 0)
+  }
+  
+}else{
+ 
+  # if there are any sig contrasts
+  if(num_contrasts > 0){
+     ## trim to sig contrasts
+        sig_pvals <- list_of_pvals[[i]][which(list_of_pvals[[i]][,"p"]  < 0.05),] %>%
+          ### add name
+        dplyr::left_join(TimePoints_to_compare, by =c("group1","group2"))
+        
+    for(l in 1:nrow(sig_pvals)){
+     # if(pval_combined[which(rownames(pval_combined) == i),paste0(sig_comp_pairs_df$name[l])] < as.double(box_pval_cut)){
+        p <- p +
+          stat_pvalue_manual(sig_pvals[l,], label = "p",size = 2.5,
+                             y.position = max_y+0.1*l*range_y, bracket.size = 0.2, tip.length = 0)
+                             
+    #  }else{
+    #    p <- p
+    #  }
+        }
+      
+      
+  }else{
+    p <- p
+  }   
+
+  
+}
+    
+ 
+  # plot(p)
+  list_of_plots[[i]] <- p
+  
+  
+  
+  cat("\n")
+  cat(' \n \n') ### this is the key!
+  
+}
+
+do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
+
+
+```
+
+
+### Fig 8B
+
+```{r setVars_Fig8B}
+varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8B",colnames(list_of_datasets[["AIM"]]))]%>%
+  str_remove_all("Fig8__")
+
+num_columns_for_plot <- 1
+```
+
+
+```{r Lineplots_with_pvalues_Fig8B, ref.label=c('Lineplots_with_pvaluesSPIKE'), results='asis', fig.height=3, fig.width=3}
+```
+
+### Fig 8C
+
+```{r setVars_Fig8C}
+varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8C",colnames(list_of_datasets[["AIM"]]))]%>%
+  str_remove_all("Fig8__")
+
+num_columns_for_plot <- 1
+```
+
+
+```{r Lineplots_with_pvalues_Fig8C, ref.label=c('Lineplots_with_pvaluesSPIKE'), results='asis', fig.height=3, fig.width=3}
+```
+
+### Fig 8D
+
+```{r setVars_Fig8D}
+varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8D",colnames(list_of_datasets[["AIM"]]))]%>%
+  str_remove_all("Fig8__")
+
+num_columns_for_plot <- 3
+```
+
+
+```{r Lineplots_with_pvalues_Fig8D, ref.label=c('Lineplots_with_pvaluesSPIKE'), results='asis', fig.height=3, fig.width=7}
+```
+
+
+### Fig 8E
+
+```{r setVars_Fig8E}
+varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8E",colnames(list_of_datasets[["AIM"]]))]%>%
+  str_remove_all("Fig8__")
+
+num_columns_for_plot <- 3
+```
+
+
+```{r Lineplots_with_pvalues_Fig8E, ref.label=c('Lineplots_with_pvaluesSPIKE'), results='asis', fig.height=6, fig.width=7}
+```
+
+
+
+
+
+## Data Tables {.tabset}
+
+### Compiled raw data
+
+```{r rawdata_print}
+
+##save
+openxlsx::write.xlsx(list_of_datasets,file.path(outputTABLES_dir,paste0("list_of_RAW_datasets.xlsx")))
+
+#### add with button
+xfun::embed_file(file.path(outputTABLES_dir,paste0("list_of_RAW_datasets.xlsx")), text = "Excel spreadsheet of RAW datasets")
+
+```
+
+
+### log2 FC
+
+```{r diffcounts_print}
+
+##save
+openxlsx::write.xlsx(list_of_diff_counts,file.path(outputTABLES_dir,paste0("list_of_log2FC.xlsx")))
+
+#### add with button
+xfun::embed_file(file.path(outputTABLES_dir,paste0("list_of_log2FC.xlsx")), text = "Excel spreadsheet of log2 FC")
+
+```
+
+### Stats 
+
+```{r stats_print}
+##save
+openxlsx::write.xlsx(list_of_stats,file.path(outputTABLES_dir,paste0("list_of_stats.xlsx")))
+
+#### add with button
+xfun::embed_file(file.path(outputTABLES_dir,paste0("list_of_stats.xlsx")), text = "Excel spreadsheet of stats")
+
+
+```
+
+## Session Info
+
+```{r sessionInfo}
+sessionInfo()
+```
+
