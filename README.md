@@ -5,7 +5,7 @@ This repo contains the data tables and code used to produce the figures in the m
 
 - raw datasets used can be found in input_data/list_of_RAW_datasets.xlsx
 
-- processed data (log2 FC) can be found in outputs/list_of_log2FC.xlsx
+- processed data plotted in each figure panel can be found in outputs/list_of_plottedValues.xlsx
 
 - statistical analysis results can be found in outputs/list_of_stats.xlsx
 
