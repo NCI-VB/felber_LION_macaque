@@ -112,7 +112,7 @@ list_of_datasets <- lapply(tab_names,
 names(list_of_datasets) <- tab_names
 
 ### open list for data plotted in each figure panel
-list_of_diff_counts <- list()
+list_of_plotted <- list()
 list_of_stats <- list()
 
 ```
@@ -183,7 +183,8 @@ for(i in unique(data_to_use$Fig)){
 
       # plot(p)
 
-    list_of_plots_mean[[i]] <- p_mean   
+    list_of_plots_mean[[i]] <- p_mean  
+
   
   cat("\n")
   cat(' \n \n') ### this is the key!
@@ -194,7 +195,7 @@ do.call("grid.arrange",c(list_of_plots_mean, ncol=num_columns_for_plot))
 
   cat("\n")
   cat(' \n \n') ### this is the key!
-
+    list_of_plotted[[contrast_name]] <- data_to_use
 ```
 
 ### Fig 1D 
@@ -237,6 +238,8 @@ num_columns_for_plot <- 1
         theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(),
             panel.border = element_blank(), axis.line = element_line(colour = "black"))
 plot(p)
+
+list_of_plotted[[paste0(contrast_name)]] <- data_to_use
 ```
 
 
@@ -376,6 +379,8 @@ if(plot_sig_only == "no"){
 }
     
  plot(p)
+ 
+ list_of_plotted[[paste0(contrast_name)]] <- phen_to_plot
 
 ```
 
@@ -452,6 +457,8 @@ p <- pheatmap(df_for_plot, scale="none", col = mycols,
 )
 p
 
+ list_of_plotted[[paste0(contrast_name)]] <- df_for_plot %>% 
+   rownames_to_column("MacaqueID")
 
 
 ```
@@ -546,6 +553,9 @@ do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
   cat("\n")
   cat(' \n \n') ### this is the key!
+
+  list_of_plotted[[paste0(contrast_name)]] <- data_to_use %>%
+    dplyr::select(c(Fig,MacaqueID,TimePoint,value_raw,log10_value)) 
 
 ```
 
@@ -661,6 +671,7 @@ for(i in unique(data_to_use$Fig)){
   
  
     list_of_plots[[i]] <- p   
+
   
   cat("\n")
   cat(' \n \n') ### this is the key!
@@ -671,6 +682,8 @@ do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
   cat("\n")
   cat(' \n \n') ### this is the key!
+
+    list_of_plotted[[paste0(contrast_name)]] <- data_to_use
 
 ```
 
@@ -715,6 +728,7 @@ raw_or_adj <- "_pval" #"_adjpval"
 
 ### To name output files
 contrast_name <- "Fig2DE"
+curr_figure_panel <- "Fig2DE"
 #contrast_name <- "Fig5D_Myeloid_vsD1"
 
 ### for scatterplots
@@ -769,6 +783,7 @@ for(i in unique(data_to_use$Fig)){
     }
      }
   list_of_pvals[[paste0(i)]] <- pval_df
+  
 }
 
 
@@ -862,7 +877,7 @@ if(plot_sig_only == "no"){
   # plot(p)
   list_of_plots[[i]] <- p
   
-  
+
   
   cat("\n")
   cat(' \n \n') ### this is the key!
@@ -877,6 +892,8 @@ list_of_plots_ordered[[3]] <- list_of_plots[[2]]
 list_of_plots_ordered[[4]] <- list_of_plots[[4]]
 
 do.call("grid.arrange",c(grobs = list_of_plots_ordered, ncol=num_columns_for_plot))
+
+  list_of_plotted[[paste0(curr_figure_panel)]] <- data_to_use
 
 ```
 
@@ -923,6 +940,7 @@ for(i in rev(sort(unique(data_to_use$Fig)))){
 
   
     list_of_plots[[i]] <- p   
+
   
   cat("\n")
   cat(' \n \n') ### this is the key!
@@ -933,6 +951,7 @@ do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
   cat("\n")
   cat(' \n \n') ### this is the key!
+    list_of_plotted[[paste0(contrast_name)]] <- data_to_use
 
 ```
 
@@ -1148,6 +1167,9 @@ for(npt in 1:nrow(TimePoints_to_compare)){
   curr_contrasts <- c(curr_contrasts,cont)
 }
 
+#### to collect plotted values
+plotted_prep <- data.frame()
+
 for(i in seq_along(curr_contrasts)){
   c <- curr_contrasts[i]
   label.col <- "rowname"
@@ -1291,6 +1313,17 @@ p <- ggplot(res.sub,aes(.data[[change_lfc_name]],-log10(.data[[change_sig_name]]
 
 
   print(p)
+  name_simp_c <- c %>%
+    str_remove_all(" ") %>%
+    str_remove_all("\\+") %>%
+    str_replace_all("[(]","_") %>%
+    str_remove_all("[)]")
+  
+  plotted_prep <- rbind(plotted_prep,res.sub %>% 
+                          dplyr::mutate(TimePoint = paste0(name_simp_c))) 
+
+
+
   
   
  cat("\n")
@@ -1300,7 +1333,8 @@ cat(' \n \n') ### this is the key!
  cat("\n")
 cat(' \n \n') ### this is the key!
 
-
+       list_of_plotted[[paste0(contrast_name)]] <- plotted_prep %>%
+         dplyr::mutate(neg_log10p = -log10(!!rlang::sym(change_sig_name)))
 ```
 
 
@@ -1356,6 +1390,7 @@ raw_or_adj <- "_pval" #"_adjpval"
 
 ### To name output files
 contrast_name <- "Fig3B_MSD_V4"
+curr_figure_panel <- "Fig3B"
 ```
 
 
@@ -1465,7 +1500,8 @@ p
 cat(' \n \n') ### this is the key!
 
 
- 
+ list_of_plotted[[paste0(curr_figure_panel)]] <- degs_df_for_hm[rownames(curr_ann_row),rownames(annotation_col)] %>%
+   rownames_to_column("analyte")
 ```
 
 
@@ -1624,7 +1660,8 @@ diff_counts <- diff_counts %>%
   ## remove columns with all NAs
   select_if(~ !all(is.na(.))) 
 
-list_of_diff_counts[[paste0(contrast_name)]] <- diff_counts
+list_of_plotted[[paste0(contrast_name,"_log2FC")]] <- diff_counts %>%
+  dplyr::rename(variable = Gene)
 ```
 
 ```{r SpearmanCorrleation, results='asis', fig.height=8, fig.width=8}
@@ -1727,7 +1764,9 @@ corrplot(M, method = "ellipse", col = col,
                      # hide correlation coefficient on the principal diagonal
                      diag = FALSE)$corrPos
 
-
+#### plotted is same as stats, but filtered to p < 0.05
+list_of_plotted[[paste0(contrast_name,"_spCorr")]] <- list_of_stats[[paste0(contrast_name)]] %>%
+  dplyr::filter(p.value < p_val_levels[i])
 ```
 
 
@@ -1800,6 +1839,7 @@ contrast_name <- "FigS1A_MSD"
 
 
 ```{r FigS1A_Log2FCest_heatmaps_setup}
+curr_figure_panel <- "FigS1A"
 ### read in degs results
 degs_df <- list_of_stats[["FigS1A_MSD"]]
 
@@ -1901,7 +1941,8 @@ p
   cat("\n")
 cat(' \n \n') ### this is the key!
 
-
+list_of_plotted[[paste0(curr_figure_panel)]] <- degs_df_for_hm[,rownames(annotation_col)] %>%
+  rownames_to_column("analyte")
 ```
 
 ### Fig S1B {.tabset}
@@ -1963,6 +2004,7 @@ num_columns_for_plot <- 2
 
 list_of_plots_mean <- list()
 list_of_plots_median <- list()
+plotted_prep <- data.frame() ### to save plotted values
 ## for each analyte of interest
 for(i in selected_analytes){
  phen_to_plot <- df_long %>%
@@ -1992,7 +2034,10 @@ for(i in selected_analytes){
 
       # plot(p)
   list_of_plots_mean[[i]] <- p_mean
-  list_of_plots_median[[i]] <- p_median  
+  list_of_plots_median[[i]] <- p_median 
+  
+  ### save for plotted values
+  plotted_prep <- rbind(plotted_prep,phen_to_plot)
   
   
   cat("\n")
@@ -2014,6 +2059,13 @@ do.call("grid.arrange",c(list_of_plots_median, ncol=num_columns_for_plot))
   cat("\n")
   cat(' \n \n') ### this is the key!
 
+   list_of_plotted[[paste0(contrast_name)]] <- plotted_prep %>%
+     ### add means
+     dplyr::group_by(vax_dose_day,variable) %>%
+     dplyr::mutate(mean = mean(raw_value),
+                   median = median(raw_value),
+                   vax_dose_day2 = NULL) %>%
+     dplyr::relocate(variable,MacaqueID,vax_dose_day)
 ```
 
 
@@ -2118,6 +2170,9 @@ combo_df_long <- annotation_row %>%
     cat("\n")
   cat(' \n \n') ### this is the key!
   
+  
+     list_of_plotted[[paste0("FigS1C_MSD_V4")]] <- combo_df_long
+  
 ```
 
 
@@ -2190,6 +2245,7 @@ contrast_name <- "FigS2B_MSD"
 
 
 ```{r FigS2B_Log2FCest_heatmaps_setup}
+curr_figure_panel <- "FigS2B"
 ### read in degs results
 degs_df <- list_of_stats[["FigS2B_MSD"]]
 
@@ -2324,7 +2380,7 @@ for(i in selected_analytes){
       # plot(p)
   list_of_plots[[i]] <- p
 
-  
+
   
   cat("\n")
   cat(' \n \n') ### this is the key!
@@ -2337,6 +2393,10 @@ do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
   cat("\n")
   cat(' \n \n') ### this is the key!
 
+  list_of_plotted[[paste0(contrast_name)]] <- df_long %>%
+    dplyr::select(-vax_dose_day2) %>%
+    ## make wider for ease of viewing
+    tidyr::pivot_wider(names_from = "variable",values_from = "raw_value")
  
 ```
 
@@ -2395,6 +2455,7 @@ raw_or_adj <- "_pval" #"_adjpval"
 
 ### To name output files
 contrast_name <- "Fig4C"
+curr_figure_panel <- "Fig4C"
 
 ### for scatterplots
 plot_sig_only <- "no"
@@ -2564,6 +2625,11 @@ if(plot_sig_only == "no"){
 
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
+
+  list_of_plotted[[paste0(curr_figure_panel)]] <- df_long %>%
+    ### make wider 
+    dplyr::select(-variable,-compartment) %>%
+    tidyr::pivot_wider(names_from = "comp_var",values_from = "raw_value")
 
 ```
 
@@ -2779,6 +2845,11 @@ if(plot_sig_only == "no"){
   cat("\n")
   cat(' \n \n') ### this is the key!
   
+  
+  list_of_plotted[[paste0(contrast_name)]] <- phen_to_plot %>%
+    ### make wider for simplicity
+    dplyr::select(-var_tp) %>%
+    tidyr::pivot_wider(names_from = "variable", values_from = "raw_value")
 
 ```
 
@@ -2835,6 +2906,7 @@ raw_or_adj <- "_pval" #"_adjpval"
 
 ### To name output files
 contrast_name <- "Fig4E"
+curr_figure_panel <- "Fig4E"
 
 ### for scatterplots
 plot_sig_only <- "no"
@@ -2903,6 +2975,7 @@ raw_or_adj <- "_pval" #"_adjpval"
 
 ### To name output files
 contrast_name <- "FigS3"
+curr_figure_panel <- "FigS3"
 
 ### for scatterplots
 plot_sig_only <- "no"
@@ -2986,6 +3059,7 @@ num_columns_for_plot <- 3
 
 ```{r setVars_Fig5A}
 varcomp_to_plot <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos","LN__Pct_of_HLADRpos_HLA_DRpos_Ki67pos")
+curr_figure_panel <- "Fig5A"
 ```
 
 ```{r Lineplots_with_pvalues, results='asis', fig.height=4, fig.width=6}
@@ -3148,6 +3222,9 @@ if(plot_sig_only == "no"){
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
 
+  list_of_plotted[[paste0(curr_figure_panel)]] <- df_long %>%
+    dplyr::select(-variable, -compartment) %>%
+    tidyr::pivot_wider(names_from = "comp_var", values_from = "raw_value")
 ```
 
 
@@ -3158,6 +3235,7 @@ varcomp_to_plot <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos","LN__Pct_of_HLAD
                      "blood__Pct_of_HLADRpos_pDC_Ki67pos","LN__Pct_of_HLADRpos_pDC_Ki67pos",
                      "blood__Pct_of_HLADRpos_cDC_Ki67pos","LN__Pct_of_HLADRpos_cDC_Ki67pos",
                      "blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos","LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos")
+curr_figure_panel <- "Fig5B"
 ```
 
 
@@ -3256,9 +3334,16 @@ varcomp_to_plot <- c("blood__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos","LN__Pct_o
 
 num_columns_for_plot <- 5
 ```
+```{r Fig5C_line}
+curr_figure_panel <- "Fig5C_line"
+```
 
 #### lineplot
 ```{r Lineplots_with_pvalues_Fig5C, ref.label=c('Lineplots_with_pvalues'), results='asis', fig.height=8, fig.width=10}
+```
+
+```{r Fig5C_hm}
+curr_figure_panel <- "Fig5C_heatmap"
 ```
 
 #### heatmap
@@ -3316,11 +3401,11 @@ raw_or_adj <- "raw"
 ```{r spearmanCorrVsMSD}
 
 ### which dataset levels/FC, trimmed to the tab
-curr_ds <- list_of_diff_counts[[paste0(contrast_name)]] %>%
-  column_to_rownames("Gene")
+curr_ds <- list_of_plotted[[paste0(contrast_name,"_log2FC")]] %>%
+  column_to_rownames("variable")
 
 ###### MSD = D2-D1 only log2FC
-curr_df2 <- data.frame(t(list_of_diff_counts[[paste0("Fig3C_MSD_V4_D2vsD1")]])) %>%
+curr_df2 <- data.frame(t(list_of_plotted[[paste0("Fig3C_MSD_V4_D2vsD1_log2FC")]])) %>%
   ### make row 1 colnames
   janitor::row_to_names(row_number = 1) %>%
   ### trim to only D2-D1
@@ -3452,7 +3537,7 @@ cor_method <- "spearman"
 trim_pval_level <- 0.05
 all_or_selected <- "selected"
 assay_arrangement <- c("CCL19.MIP.3b","CCL24.Eotaxin.2","CCL26.Eotaxin.3","CCL27.CTACK","CXCL13",
-                       "FLT3L","CCL13.MCP.4","CXCL12.SDF.1a","CCL11.Eotaxin","CCL22.MDC",
+                       "FLT3L","CXCL12.SDF.1a","CCL11.Eotaxin","CCL22.MDC",
                        
                        #"IL.17B",
                        "IL.9") ### if trimming/ordering assays
@@ -3461,6 +3546,7 @@ assay_arrangement <- c("CCL19.MIP.3b","CCL24.Eotaxin.2","CCL26.Eotaxin.3","CCL27
 ### set pos/neg/both
 directions_to_use <- c("pos")
 assays_to_exclude <- c("")
+curr_figure_panel <- "Fig5D_blood"
 ```
 
 `r paste0(raw_or_adj," p < ",trim_pval_level)`
@@ -3553,6 +3639,10 @@ bub_df2$celltype <- cleaned_celltypes
   
     
  
+  list_of_plotted[[paste0(curr_figure_panel)]] <- bub_df_bothordered %>%
+    dplyr::select(-c(celltype,celltype_assay,comp_celltype)) %>%
+    dplyr::relocate(compartment,celltype_only) %>%
+    dplyr::rename(celltype=celltype_only)
  
   cat("\n")
     cat(' \n \n') ### this is the key!
@@ -3564,11 +3654,11 @@ bub_df2$celltype <- cleaned_celltypes
 
 ```{r Fig5D__vsMSD_LNposOnlySELECTEDmsd_setup}
 
-barbara_order <- c("blood__Pct_of_HLADRpos_HLA_DRpos_Ki67pos",
-                   "blood__Pct_of_HLADRpos_Classical_Mo_Ki67pos",
-                   "blood__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
-                   "blood__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
-                   "blood__Pct_of_HLADRpos_DC3_Ki67pos"
+barbara_order <- c("LN__Pct_of_HLADRpos_HLA_DRpos_Ki67pos",
+                   "LN__Pct_of_HLADRpos_Classical_Mo_Ki67pos",
+                   "LN__Pct_of_HLADRpos_Intermediate_Mo_Ki67pos",
+                   "LN__Pct_of_HLADRpos_Non_classical_Mo_Ki67pos",
+                   "LN__Pct_of_HLADRpos_DC3_Ki67pos"
                    )
  
 
@@ -3581,16 +3671,14 @@ raw_or_adj <- "raw"
 cor_method <- "spearman"
 trim_pval_level <- 0.05
 all_or_selected <- "selected"
-assay_arrangement <- c("CCL19.MIP.3b","CCL24.Eotaxin.2","CCL26.Eotaxin.3","CCL27.CTACK","CXCL13",
-                       "FLT3L","CCL13.MCP.4","CXCL12.SDF.1a","CCL11.Eotaxin","CCL22.MDC",
-                       
-                       #"IL.17B",
-                       "IL.9") ### if trimming/ordering assays
+assay_arrangement <- c("FLT3L","CCL13.MCP.4","CCL22.MDC","CXCL12.SDF.1a",
+                       "G.CSF","IFN.g","CCL19.MIP.3b") ### if trimming/ordering assays
 
 
 ### set pos/neg/both
 directions_to_use <- c("pos")
 assays_to_exclude <- c("")
+curr_figure_panel <- "Fig5D_LN"
 ```
 
 `r paste0(raw_or_adj," p < ",trim_pval_level)`
@@ -3632,6 +3720,7 @@ selected_pairs_df <- data.frame("var_x"=c("blood__Pct_of_HLADRpos_Classical_Mo_K
 )
 
 num_columns_for_plot <- 2
+curr_figure_panel <- "Fig5E"
 ```
 
 ```{r corrScatterplots_with_RandPvalues, results='asis', fig.height=10}
@@ -3661,6 +3750,7 @@ df_long <- curr_ds %>%
 
 
 list_of_plots <- list()
+plotted_prep <- data.frame()
 ## for each selected pair
 for(i in 1:nrow(selected_pairs_df)){
   curr_x <- selected_pairs_df$var_x[i]
@@ -3692,7 +3782,14 @@ for(i in 1:nrow(selected_pairs_df)){
             axis.title = element_text(size = 10)) ### make smaller to fit
   # plot(p)
   list_of_plots[[i]] <- p
-  
+  plotted_prep <- rbind(plotted_prep, 
+                        phen_to_plot %>%
+                          dplyr::mutate(x_variable = paste0(curr_x,"___",curr_Day_x),
+                                        y_variable = paste0(curr_y,"___",curr_Day_y)) %>%
+                          dplyr::rename(x_value = !!rlang::sym(paste0(curr_x,"___",curr_Day_x)),
+                                        y_value = !!rlang::sym(paste0(curr_y,"___",curr_Day_y))) %>%
+                          dplyr::relocate(MacaqueID, x_variable, x_value, y_variable, y_value)
+                        )
   
   
   cat("\n")
@@ -3702,6 +3799,8 @@ for(i in 1:nrow(selected_pairs_df)){
 
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
+ 
+  list_of_plotted[[paste0(curr_figure_panel)]] <- plotted_prep 
 
 ```
 
@@ -3717,12 +3816,13 @@ varcomp_to_plot <- c("blood__Pct_of_HLADRpos_pDC_Ki67pos","LN__Pct_of_HLADRpos_p
 
 #### need to reload Fig5 prep
 list_of_stats[["FigS4A"]] <- data.frame("FigS4A"="stats are in the Fig5ABC tab")
+curr_figure_panel <- "FigS4A"
 ```
 
 ```{r prep_FigS4A, ref.label=c('prep_Fig5')}
 ```
 
-```{r Lineplots_with_pvalues_FigS4A, ref.label=c('Lineplots_with_pvalues'), eval=TRUE, results='asis', fig.height=6, fig.width=8}
+```{r Lineplots_with_pvalues_FigS4A, ref.label=c('Lineplots_with_pvalues'), eval=TRUE, results='asis', fig.height=7, fig.width=8}
 ```
 
 
@@ -3906,11 +4006,12 @@ g_legend<-function(a.gplot){
   return(legend)}
 ### add empty filler
 list_of_plots[[length(list_of_plots)+1]]<-ggplot()+theme_void()
-list_of_plots[[length(list_of_plots)+2]]<-g_legend(p1) ### grabs from the l
+list_of_plots[[length(list_of_plots)+1]]<-g_legend(p1) ### grabs from the l
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
 
-
+list_of_plotted[[paste0(contrast_name)]] <-  curr_phen_long %>%
+  dplyr::select(-comp_time)
 ```
 
 ## Figure 6 {.tabset}
@@ -3980,6 +4081,7 @@ num_columns_for_plot <- 3
 ```{r setVars_Fig6B}
 varcomp_to_plot <- c("LN__CD4_Tfh_Ki67pos","LN__GC_CD4_Tfh_Ki67pos",
                      "LN__gCD8_Tfh_Ki67pos","LN__B_Cells_Bcl6pos_Pct_B_cells")
+curr_figure_panel <- "Fig6B"
 ```
 
 ```{r Log2FCest_heatmaps_setup_CellPops_Fig6B, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
@@ -4047,10 +4149,10 @@ for(set_name in set_names_to_use){
   cor_method <- "spearman"
   
   
-curr_ds <- list_of_diff_counts[[paste0(contrast_name)]] %>%
+curr_ds <- list_of_plotted[[paste0(contrast_name,"_log2FC")]] %>%
   ### trim to only the vars desired
-  dplyr::filter(Gene %in% vars_for_selfCorr) %>%
-  column_to_rownames("Gene")
+  dplyr::filter(variable %in% vars_for_selfCorr) %>%
+  column_to_rownames("variable")
 
   curr_df <- data.frame(t(curr_ds)) %>%
     
@@ -4248,6 +4350,16 @@ cat(' \n \n') ### this is the key!
 list_of_stats[[paste0(CorrName)]] <- fullcombo_df_long %>% 
   dplyr::relocate(celltype1, celltype2, corr_coef, p, timepoint)
 
+#### plotted is same as stats but trimmed
+list_of_plotted[[paste0(CorrName)]] <- list_of_stats[[paste0(CorrName)]] %>%
+  dplyr::select(-celltype1_vs_2) %>%
+  ## remove diagonal
+  dplyr::filter(celltype1 != celltype2) %>%
+  ## remove inverse duplicates
+ group_by(grp = paste(pmax(celltype1, celltype2), pmin(celltype1, celltype2), sep = "_")) %>%
+ dplyr::filter(row_number() == 1) %>%
+ ungroup() %>%
+ dplyr::select(-grp)
 
 ```
 
@@ -4399,6 +4511,8 @@ pval_df$lmer_padj <- p.adjust(pval_df$lmer_praw, method = 'BH')
 ### save
 list_of_stats[[paste0(contrast_name,"_lmerTestByTime")]] <- pval_df
 list_of_stats[[paste0(contrast_name,"_lmPerAnimalByTime")]] <- animal_pval_df
+
+
 
 ```
 
@@ -4626,6 +4740,8 @@ cat(' \n \n') ### this is the key!
 
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
+list_of_plotted[[paste0(contrast_name)]] <- phen_to_plot %>%
+  dplyr::select(-celltype_zone)
 
 ```
 
@@ -4641,6 +4757,7 @@ varcomp_to_plot <- c("LN__CD4_Tfh_CXCR3neg_Ki67pos","LN__CD4_Tfh_CXCR3pos_Ki67po
 
 #### reset contrast name to full p values
 contrast_name <- "Fig6BE"
+curr_figure_panel <- "Fig6E"
 ```
 
 ```{r Log2FCest_heatmaps_setup_CellPops_Fig6E, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
@@ -4726,6 +4843,8 @@ assay_arrangement <- c("CCL2.MCP.1","CCL3.MIP.1a","CCL4.MIP.1b","CCL8.MCP.2",
 ### set pos/neg/both
 directions_to_use <- c("pos")
 assays_to_exclude <- c("")
+
+curr_figure_panel <- "Fig6F"
 ```
 
 `r paste0(raw_or_adj," p < ",trim_pval_level)`
@@ -4804,16 +4923,16 @@ vars_for_AbCorr <-c("LN__CD4_Tfh_CXCR3neg_Ki67pos",
                    "LN__Bcells_GC_BCL6pos_ki67pos_PctBCells")
 ### load GC pops
 contrast_name <- "Fig6FG_GC"
-curr_ds <- list_of_diff_counts[[paste0(contrast_name)]] %>%
+curr_ds <- list_of_plotted[[paste0(contrast_name,"_log2FC")]] %>%
   ### trim to only the vars desired
-  dplyr::filter(Gene %in% vars_for_AbCorr) %>%
-  column_to_rownames("Gene")
+  dplyr::filter(variable %in% vars_for_AbCorr) %>%
+  column_to_rownames("variable")
 
 
 ### load Abs
 contrast_name <- "Fig6G_Abs"
-curr_ds_abs <- list_of_diff_counts[[paste0(contrast_name)]] %>%
-  column_to_rownames("Gene") %>%
+curr_ds_abs <- list_of_plotted[[paste0(contrast_name,"_log2FC")]] %>%
+  column_to_rownames("variable") %>%
   t() %>%
   data.frame() %>%
   #### remove rows with all NA
@@ -4927,6 +5046,7 @@ set_name <- "Intervals"
 list_of_stats[[paste0(CorrName)]] <- curr_df_long %>% 
   dplyr::relocate(celltype, assay, corr_coef, p, timepoint)  
     
+list_of_plotted[[paste0(CorrName)]] <- list_of_stats[[paste0(CorrName)]] 
     
     raw_or_adj <- "raw"
     ann_pval_level <- 0.05
@@ -5008,6 +5128,7 @@ list_of_stats[[paste0(CorrName)]] <- curr_df_long %>%
 
 ```{r scatterplots_with_pvalues___FigS5A_prep}
 contrast_name <- "Fig6BE"
+curr_figure_panel <- "FigS5A"
 data_to_useFig6 <- data_to_use
 ### trim to only vars to plot
 variables_ordered <- c("LN__CD4_Tfh_Ki67pos","LN__GC_CD4_Tfh_Ki67pos",
@@ -5082,6 +5203,7 @@ Contrasts within D3, D8 D22 are only for LION treatments, since CTRLs have just 
 
 ```{r scatterplots_with_pvalues___FigS5C_prep}
 contrast_name <- "Fig6BE"
+curr_figure_panel <- "FigS5C"
 
 ### trim to only vars to plot
 variables_ordered <- c("LN__CD4_Tfh_CXCR3pos_Ki67pos",
@@ -5112,11 +5234,11 @@ Selected scatterplots
 ```{r corrScatterPlots_prep_FigS6}
 ########## Reload data from Fig 6F
 ### which dataset levels/FC, trimmed to the tab
-curr_ds <- list_of_diff_counts[[paste0("Fig6FG_GC")]] %>%
-  column_to_rownames("Gene")
+curr_ds <- list_of_plotted[[paste0("Fig6FG_GC_log2FC")]] %>%
+  column_to_rownames("variable")
 
 ###### MSD = D2-D1 only log2FC
-curr_df2 <- data.frame(t(list_of_diff_counts[[paste0("Fig3C_MSD_V4_D2vsD1")]])) %>%
+curr_df2 <- data.frame(t(list_of_plotted[[paste0("Fig3C_MSD_V4_D2vsD1_log2FC")]])) %>%
   ### make row 1 colnames
   janitor::row_to_names(row_number = 1) %>%
   ### trim to only D2-D1
@@ -5160,6 +5282,7 @@ selected_pairs_df <- data.frame("var_x"=c("LN__CD4_Tfh_CXCR3pos_Ki67pos",
 )
 
 num_columns_for_plot <- 2
+curr_figure_panel <- "FigS6"
 ```
 
 ```{r corrScatterplots_with_RandPvalues__FigS6, ref.label=c('corrScatterplots_with_RandPvalues'), results='asis', fig.height=10}
@@ -5274,7 +5397,8 @@ for(i in unique(curr_phen_long$comp_time)){
 
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
-
+list_of_plotted[[paste0(contrast_name)]] <- curr_phen_long %>%
+  dplyr::select(-comp_time)
 
 ```
 
@@ -5344,6 +5468,7 @@ varcomp_to_plot <- c("blood__CD8_CM_Ki67pos","LN__CD8_CM_Ki67pos",
                      "blood__CD8_EM_Ki67pos","LN__CD8_EM_Ki67pos",
                      "blood__CD8_CM_GzmBpos_Ki67pos","LN__CD8_CM_GzmBpos_Ki67pos",
                      "blood__CD8_EM_GzmBpos_Ki67pos","LN__CD8_EM_GzmBpos_Ki67pos")
+curr_figure_panel <- "Fig7B"
 ```
 
 ```{r Log2FCest_heatmaps_setup_CellPops_Fig7B, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
@@ -5358,6 +5483,8 @@ varcomp_to_plot <- c("blood__CD8_CM_Ki67pos","LN__CD8_CM_Ki67pos",
 varcomp_to_plot <- c("blood__CD8_Tfh_Ki67pos","LN__CD8_Tfh_Ki67pos",
                      "blood__CD8_Tfh_GzmBpos","LN__CD8_Tfh_GzmBpos",
                      "blood__CD8_Tfh_GzmBpos_Ki67pos","LN__CD8_Tfh_GzmBpos_Ki67pos")
+
+curr_figure_panel <-"Fig7C"
 ```
 
 ```{r Log2FCest_heatmaps_setup_CellPops_Fig7C, ref.label=c('Log2FCest_heatmaps_setup_CellPops')}
@@ -5443,6 +5570,7 @@ assay_arrangement <- c("CCL2.MCP.1","CCL3.MIP.1a","CCL4.MIP.1b","CCL8.MCP.2",
 ### set pos/neg/both
 directions_to_use <- c("pos")
 assays_to_exclude <- c("CCL27.CTACK","IL.5")
+curr_figure_panel <- "Fig7D"
 ```
 
 `r paste0(raw_or_adj," p < ",trim_pval_level)`
@@ -5478,6 +5606,7 @@ assay_arrangement <- c("CCL2.MCP.1","CCL3.MIP.1a","CCL4.MIP.1b","CCL8.MCP.2",
                        "CX3CL1.Fractalkine") ### set pos/neg/both
 directions_to_use <- c("pos")
 assays_to_exclude <- c("CCL27.CTACK","IL.5")
+curr_figure_panel <- "Fig7E"
 ```
 
 `r paste0(raw_or_adj," p < ",trim_pval_level)`
@@ -5548,6 +5677,8 @@ varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8A",colnames(
   str_remove_all("Fig8__")
 
 num_columns_for_plot <- 1
+curr_figure_panel <- "Fig8A"
+
 ```
 
 
@@ -5711,6 +5842,10 @@ if(plot_sig_only == "no"){
 do.call("grid.arrange",c(list_of_plots, ncol=num_columns_for_plot))
 
 
+list_of_plotted[[paste0(curr_figure_panel)]] <- df_long %>%
+  dplyr::select(-variable, -compartment) %>%
+  dplyr::relocate(comp_var,MacaqueID,treat) %>%
+  dplyr::rename(panel_variable=comp_var)
 ```
 
 
@@ -5721,6 +5856,7 @@ varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8B",colnames(
   str_remove_all("Fig8__")
 
 num_columns_for_plot <- 1
+curr_figure_panel <- "Fig8B"
 ```
 
 
@@ -5734,6 +5870,7 @@ varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8C",colnames(
   str_remove_all("Fig8__")
 
 num_columns_for_plot <- 1
+curr_figure_panel <- "Fig8C"
 ```
 
 
@@ -5747,6 +5884,7 @@ varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8D",colnames(
   str_remove_all("Fig8__")
 
 num_columns_for_plot <- 3
+curr_figure_panel <- "Fig8D"
 ```
 
 
@@ -5761,6 +5899,7 @@ varcomp_to_plot <- colnames(list_of_datasets[["AIM"]])[grepl("panel8E",colnames(
   str_remove_all("Fig8__")
 
 num_columns_for_plot <- 3
+curr_figure_panel <- "Fig8E"
 ```
 
 
@@ -5786,15 +5925,15 @@ xfun::embed_file(file.path(outputTABLES_dir,paste0("list_of_RAW_datasets.xlsx"))
 ```
 
 
-### log2 FC
+### Plotted values
 
 ```{r diffcounts_print}
 
 ##save
-openxlsx::write.xlsx(list_of_diff_counts,file.path(outputTABLES_dir,paste0("list_of_log2FC.xlsx")))
+openxlsx::write.xlsx(list_of_plotted,file.path(outputTABLES_dir,paste0("list_of_plottedValues.xlsx")))
 
 #### add with button
-xfun::embed_file(file.path(outputTABLES_dir,paste0("list_of_log2FC.xlsx")), text = "Excel spreadsheet of log2 FC")
+xfun::embed_file(file.path(outputTABLES_dir,paste0("list_of_plottedValues.xlsx")), text = "Excel spreadsheet of plotted values")
 
 ```
 
